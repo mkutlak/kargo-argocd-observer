@@ -30,9 +30,9 @@ Emitted on the `Stage` object:
 | `PromotionPreviouslyFailed` | The controller already tried and failed to promote this Freight; delete the failed Promotion to retry |
 | `PromotionCreateFailed` | The Promotion create call itself failed |
 
-Drift text in logs and Events is being normalized to show the canonical Docker Hub
-repository form (`docker.io/library/...`) for Docker Hub images; this normalization is
-implemented on a sibling branch, not yet in this one.
+Drift text in logs and Events shows Docker Hub repositories in canonical form
+(`docker.io/library/nginx`), even when the Application manifest uses a short name
+such as `nginx`.
 
 ## Annotations
 

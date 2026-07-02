@@ -40,10 +40,11 @@ func parseImageRef(ref string) (repo, tag string, ok bool) {
 }
 
 // normalizeRepoURL canonicalizes Docker Hub references so "nginx",
-// "library/nginx", "docker.io/nginx", and "index.docker.io/nginx" all
-// compare equal as "docker.io/library/nginx". Non-Hub registries (first
-// path component containing "." or ":", or "localhost") pass through
-// unchanged. Lowercasing and digest handling are out of scope.
+// "library/nginx", "docker.io/nginx", and the "index.docker.io" /
+// "registry-1.docker.io" hostname aliases all compare equal as
+// "docker.io/library/nginx". Non-Hub registries (first path component
+// containing "." or ":", or "localhost") pass through unchanged.
+// Lowercasing and digest handling are out of scope.
 func normalizeRepoURL(repo string) string {
 	if repo == "" {
 		return ""
@@ -53,7 +54,7 @@ func normalizeRepoURL(repo string) string {
 		return "docker.io/library/" + repo
 	}
 	first, rest := repo[:i], repo[i+1:]
-	if first == "index.docker.io" {
+	if first == "index.docker.io" || first == "registry-1.docker.io" {
 		first = "docker.io"
 	}
 	if first == "docker.io" {

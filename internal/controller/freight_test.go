@@ -59,6 +59,8 @@ func TestNormalizeRepoURL(t *testing.T) {
 		{"docker.io/nginx", "docker.io/library/nginx"},
 		{"docker.io/library/nginx", "docker.io/library/nginx"},
 		{"index.docker.io/nginx", "docker.io/library/nginx"},
+		{"registry-1.docker.io/nginx", "docker.io/library/nginx"},
+		{"registry-1.docker.io/acme/web", "docker.io/acme/web"},
 		{"acme/web", "docker.io/acme/web"},
 		{"docker.io/acme/web", "docker.io/acme/web"},
 		{"registry.example.com/app", "registry.example.com/app"},
