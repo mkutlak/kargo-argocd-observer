@@ -4,7 +4,8 @@
 
 Kubernetes controller that reconciles Kargo Stage state with what ArgoCD has actually
 deployed — so hand-committed image-tag bumps show up in Kargo instead of leaving Stages
-stale. See `README.md` for the full design.
+stale. See `docs/architecture.md` for the full design; `README.md` is the concise
+entry point.
 
 ## Tech Stack
 
@@ -57,6 +58,7 @@ mise run clean           # remove build artifacts
 | `internal/version/` | `Version`/`BuildDate`/`BuildRef` vars, injected at link time via `-ldflags` |
 | `deploy/` | Plain Kubernetes manifests — namespace, ServiceAccount/RBAC, Deployment, Service, ServiceMonitor, PrometheusRule |
 | `charts/` | Helm chart (`kargo-argocd-observer`) — templated equivalent of `deploy/`, published to GHCR as an OCI artifact |
+| `docs/` | Documentation — architecture, reference (flags/metrics/events), development, release |
 
 ## Agent Routing
 
