@@ -19,6 +19,12 @@ replicaCount: 2
 # create (visible in logs and Stage Events) match expectations.
 dryRun: true
 
+# Scoped rollout: only act on Applications annotated
+# kargo-observer.kutlak.cc/observe: "true". Start opt-in, annotate the
+# Applications you want observed, then switch to opt-out once you're
+# confident the controller should watch everything (unless ignored).
+observeMode: opt-in
+
 # Leader election — required whenever replicaCount > 1 so only one replica
 # reconciles at a time.
 leaderElect: true

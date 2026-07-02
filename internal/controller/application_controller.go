@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -33,12 +34,39 @@ const (
 	authorizedStageAnnotation = "kargo.akuity.io/authorized-stage"
 	// ignoreAnnotation opts an Application out of observation when set to "true".
 	ignoreAnnotation = "kargo-observer.kutlak.cc/ignore"
+	// observeAnnotation opts an Application into observation in opt-in mode
+	// when set to "true"; see ObserveModeOptIn.
+	observeAnnotation = "kargo-observer.kutlak.cc/observe"
 
 	managedByLabel = "app.kubernetes.io/managed-by"
 	managedByValue = "kargo-argocd-observer"
 	stageLabel     = "kargo-observer.kutlak.cc/stage"
 	freightLabel   = "kargo-observer.kutlak.cc/freight"
 )
+
+// Observe mode values for ApplicationReconciler.ObserveMode / --observe-mode.
+const (
+	// ObserveModeOptOut observes every Application carrying the
+	// authorized-stage annotation unless it is ignored (the default).
+	ObserveModeOptOut = "opt-out"
+	// ObserveModeOptIn additionally requires the observe annotation to be
+	// "true" before an Application is observed.
+	ObserveModeOptIn = "opt-in"
+)
+
+// ParseObserveMode validates and normalizes an --observe-mode flag value.
+// The empty string maps to ObserveModeOptOut so the ApplicationReconciler{}
+// zero value keeps existing behavior.
+func ParseObserveMode(s string) (string, error) {
+	switch s {
+	case "", ObserveModeOptOut:
+		return ObserveModeOptOut, nil
+	case ObserveModeOptIn:
+		return ObserveModeOptIn, nil
+	default:
+		return "", fmt.Errorf("invalid observe mode %q: must be %q or %q", s, ObserveModeOptOut, ObserveModeOptIn)
+	}
+}
 
 var (
 	applicationGVK = schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"}
@@ -60,6 +88,22 @@ type ApplicationReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 	DryRun   bool
+	// ObserveMode is one of ObserveModeOptOut (default) or ObserveModeOptIn;
+	// see shouldObserve.
+	ObserveMode string
+}
+
+// shouldObserve reports whether an Application with these annotations is
+// observed: ignore always wins; opt-in mode also requires the observe
+// annotation to be "true".
+func (r *ApplicationReconciler) shouldObserve(annotations map[string]string) bool {
+	if annotations[ignoreAnnotation] == "true" {
+		return false
+	}
+	if r.ObserveMode == ObserveModeOptIn {
+		return annotations[observeAnnotation] == "true"
+	}
+	return true
 }
 
 // Reconcile compares the Application's deployed images with its Kargo Stage's
@@ -74,7 +118,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	annotations := app.GetAnnotations()
-	if annotations[ignoreAnnotation] == "true" {
+	if !r.shouldObserve(annotations) {
 		return ctrl.Result{}, nil
 	}
 	stageNS, stageName, ok := parseAuthorizedStage(annotations[authorizedStageAnnotation])
@@ -265,18 +309,18 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("kargo-argocd-observer").
-		For(app, builder.WithPredicates(applicationPredicate())).
+		For(app, builder.WithPredicates(r.applicationPredicate())).
 		Watches(stage, handler.EnqueueRequestsFromMapFunc(r.applicationsForStage)).
 		Complete(r)
 }
 
 // applicationPredicate admits Applications carrying the authorized-stage
-// annotation (and not opted out), and filters updates down to annotation or
-// deployed-image changes.
-func applicationPredicate() predicate.Funcs {
+// annotation and observed per shouldObserve, and filters updates down to
+// annotation or deployed-image changes.
+func (r *ApplicationReconciler) applicationPredicate() predicate.Funcs {
 	relevant := func(o client.Object) bool {
 		annotations := o.GetAnnotations()
-		return annotations[authorizedStageAnnotation] != "" && annotations[ignoreAnnotation] != "true"
+		return annotations[authorizedStageAnnotation] != "" && r.shouldObserve(annotations)
 	}
 	return predicate.Funcs{
 		CreateFunc:  func(e event.CreateEvent) bool { return relevant(e.Object) },
@@ -314,7 +358,8 @@ func (r *ApplicationReconciler) applicationsForStage(ctx context.Context, obj cl
 	var requests []reconcile.Request
 	for i := range apps.Items {
 		app := &apps.Items[i]
-		if app.GetAnnotations()[authorizedStageAnnotation] == want {
+		annotations := app.GetAnnotations()
+		if annotations[authorizedStageAnnotation] == want && r.shouldObserve(annotations) {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{Namespace: app.GetNamespace(), Name: app.GetName()},
 			})

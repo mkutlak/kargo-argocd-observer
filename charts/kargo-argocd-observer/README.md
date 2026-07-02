@@ -21,13 +21,27 @@ helm install kargo-argocd-observer ./charts/kargo-argocd-observer \
   --namespace kargo-observer --create-namespace
 ```
 
-The chart installs in observe-only mode (`dryRun=true`). Watch the logs and Stage
-Events, then let the controller create real Promotions:
+The chart installs scoped to a safe rollout: `observeMode=opt-in` (only Applications
+annotated `kargo-observer.kutlak.cc/observe: "true"` are considered) and `dryRun=true`
+(intended Promotions are logged and emitted as Events, never created). Recommended
+rollout:
 
-```sh
-helm upgrade kargo-argocd-observer oci://ghcr.io/mkutlak/charts/kargo-argocd-observer \
-  --namespace kargo-observer --reuse-values --set dryRun=false
-```
+1. Install with the chart defaults and annotate one Application with
+   `kargo-observer.kutlak.cc/observe: "true"`.
+2. Watch the logs and Stage Events for the Promotions it *would* create.
+3. Once they match expectations, let it act for real:
+
+   ```sh
+   helm upgrade kargo-argocd-observer oci://ghcr.io/mkutlak/charts/kargo-argocd-observer \
+     --namespace kargo-observer --reuse-values --set dryRun=false
+   ```
+4. When you're confident the controller should watch every annotated Application
+   (unless ignored), widen scope:
+
+   ```sh
+   helm upgrade kargo-argocd-observer oci://ghcr.io/mkutlak/charts/kargo-argocd-observer \
+     --namespace kargo-observer --reuse-values --set observeMode=opt-out
+   ```
 
 ## Values
 
@@ -41,6 +55,7 @@ helm upgrade kargo-argocd-observer oci://ghcr.io/mkutlak/charts/kargo-argocd-obs
 | `imagePullSecrets` | `[]` | Pull secrets for private registries |
 | `replicaCount` | `2` | Replicas; active/standby via leader election |
 | `dryRun` | `true` | Observe-only: log/emit Events instead of creating Promotions; flip to `false` to act |
+| `observeMode` | `opt-in` | Scoped rollout: `opt-in` only acts on Applications annotated `kargo-observer.kutlak.cc/observe: "true"`; `opt-out` acts on all annotated Applications unless ignored |
 | `leaderElect` | `true` | Enable leader election (required with >1 replica) |
 | `extraArgs` | `[]` | Extra command-line arguments for the controller |
 | `serviceAccount.create` | `true` | Create the ServiceAccount |

@@ -8,6 +8,7 @@
 | `--health-probe-bind-address` | `:8081` | Address the liveness/readiness probes bind to |
 | `--leader-elect` | `false` | Enable leader election for multi-replica deployments |
 | `--dry-run` | `false` | Log and emit Events instead of creating Promotions |
+| `--observe-mode` | `opt-out` | `opt-out` observes all annotated Applications unless ignored; `opt-in` additionally requires the `kargo-observer.kutlak.cc/observe: "true"` annotation |
 
 ## Metrics
 
@@ -29,12 +30,17 @@ Emitted on the `Stage` object:
 | `PromotionPreviouslyFailed` | The controller already tried and failed to promote this Freight; delete the failed Promotion to retry |
 | `PromotionCreateFailed` | The Promotion create call itself failed |
 
+Drift text in logs and Events is being normalized to show the canonical Docker Hub
+repository form (`docker.io/library/...`) for Docker Hub images; this normalization is
+implemented on a sibling branch, not yet in this one.
+
 ## Annotations
 
 | Annotation | Applies to | Meaning |
 |---|---|---|
 | `kargo.akuity.io/authorized-stage: "<namespace>:<stage>"` | `Application` | Links the Application to its Kargo Stage; required by Kargo's own ArgoCD integration, so it is already present wherever Kargo manages the Application |
-| `kargo-observer.kutlak.cc/ignore: "true"` | `Application` | Opts the Application out of observation |
+| `kargo-observer.kutlak.cc/ignore: "true"` | `Application` | Opts the Application out of observation; wins over the observe annotation in both modes |
+| `kargo-observer.kutlak.cc/observe: "true"` | `Application` | Opts the Application into observation; only takes effect with `--observe-mode=opt-in` |
 
 ## Labels set on created Promotions
 

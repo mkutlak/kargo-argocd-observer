@@ -1,3 +1,6 @@
+{{- if not (has .Values.observeMode (list "opt-in" "opt-out")) }}
+{{- fail "observeMode must be \"opt-in\" or \"opt-out\"" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,6 +43,7 @@ spec:
           args:
             - --leader-elect={{ .Values.leaderElect }}
             - --dry-run={{ .Values.dryRun }}
+            - --observe-mode={{ .Values.observeMode }}
             {{- range .Values.extraArgs }}
             - {{ . }}
             {{- end }}

@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 const (
@@ -171,6 +174,7 @@ func TestReconcile(t *testing.T) {
 		app              *unstructured.Unstructured
 		objs             []client.Object
 		dryRun           bool
+		observeMode      string
 		wantPromotions   int
 		wantEvents       []string
 		wantNoEvents     bool
@@ -312,6 +316,51 @@ func TestReconcile(t *testing.T) {
 			wantEvents:     []string{"PromotionPreviouslyFailed"},
 			wantGauge:      float64Ptr(0),
 		},
+		{
+			name: "opt-in mode skips unannotated application",
+			app:  testApp(authorizedAnns, []string{deployedImage}),
+			objs: []client.Object{
+				testStageObj(currentTag, false),
+				testWarehouse(),
+				testFreight(freightName, deployedTag),
+			},
+			observeMode:    ObserveModeOptIn,
+			wantPromotions: 0,
+			wantNoEvents:   true,
+		},
+		{
+			name: "opt-in mode promotes annotated application",
+			app: testApp(map[string]string{
+				authorizedStageAnnotation: testNS + ":" + testStage,
+				observeAnnotation:         "true",
+			}, []string{deployedImage}),
+			objs: []client.Object{
+				testStageObj(currentTag, false),
+				testWarehouse(),
+				testFreight(freightName, deployedTag),
+			},
+			observeMode:      ObserveModeOptIn,
+			wantPromotions:   1,
+			wantEvents:       []string{"PromotionCreated"},
+			wantRequeueAfter: time.Minute,
+			wantGauge:        float64Ptr(0),
+		},
+		{
+			name: "opt-in ignore wins over observe",
+			app: testApp(map[string]string{
+				authorizedStageAnnotation: testNS + ":" + testStage,
+				observeAnnotation:         "true",
+				ignoreAnnotation:          "true",
+			}, []string{deployedImage}),
+			objs: []client.Object{
+				testStageObj(currentTag, false),
+				testWarehouse(),
+				testFreight(freightName, deployedTag),
+			},
+			observeMode:    ObserveModeOptIn,
+			wantPromotions: 0,
+			wantNoEvents:   true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -320,7 +369,7 @@ func TestReconcile(t *testing.T) {
 			objs := append([]client.Object{tc.app}, tc.objs...)
 			cl := fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
 			recorder := record.NewFakeRecorder(20)
-			r := &ApplicationReconciler{Client: cl, Scheme: sch, Recorder: recorder, DryRun: tc.dryRun}
+			r := &ApplicationReconciler{Client: cl, Scheme: sch, Recorder: recorder, DryRun: tc.dryRun, ObserveMode: tc.observeMode}
 
 			res, err := r.Reconcile(context.Background(), ctrl.Request{
 				NamespacedName: types.NamespacedName{Namespace: testAppNS, Name: testAppName},
@@ -393,5 +442,217 @@ func TestReconcileStageGone(t *testing.T) {
 	}
 	if res != (ctrl.Result{}) {
 		t.Errorf("Reconcile() result = %+v, want zero", res)
+	}
+}
+
+func TestShouldObserve(t *testing.T) {
+	tests := []struct {
+		name        string
+		observeMode string
+		annotations map[string]string
+		want        bool
+	}{
+		{name: "opt-out: no annotations", observeMode: ObserveModeOptOut, annotations: nil, want: true},
+		{name: "opt-out: authorized only", observeMode: ObserveModeOptOut, annotations: map[string]string{authorizedStageAnnotation: testNS + ":" + testStage}, want: true},
+		{name: "opt-out: observe true", observeMode: ObserveModeOptOut, annotations: map[string]string{observeAnnotation: "true"}, want: true},
+		{name: "opt-out: observe false", observeMode: ObserveModeOptOut, annotations: map[string]string{observeAnnotation: "false"}, want: true},
+		{name: "opt-out: ignore true", observeMode: ObserveModeOptOut, annotations: map[string]string{ignoreAnnotation: "true"}, want: false},
+		{name: "opt-out: ignore true and observe true", observeMode: ObserveModeOptOut, annotations: map[string]string{ignoreAnnotation: "true", observeAnnotation: "true"}, want: false},
+
+		{name: "opt-in: no annotations", observeMode: ObserveModeOptIn, annotations: nil, want: false},
+		{name: "opt-in: authorized only", observeMode: ObserveModeOptIn, annotations: map[string]string{authorizedStageAnnotation: testNS + ":" + testStage}, want: false},
+		{name: "opt-in: observe true", observeMode: ObserveModeOptIn, annotations: map[string]string{observeAnnotation: "true"}, want: true},
+		{name: "opt-in: observe false", observeMode: ObserveModeOptIn, annotations: map[string]string{observeAnnotation: "false"}, want: false},
+		{name: "opt-in: ignore true", observeMode: ObserveModeOptIn, annotations: map[string]string{ignoreAnnotation: "true"}, want: false},
+		{name: "opt-in: ignore true and observe true", observeMode: ObserveModeOptIn, annotations: map[string]string{ignoreAnnotation: "true", observeAnnotation: "true"}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &ApplicationReconciler{ObserveMode: tc.observeMode}
+			if got := r.shouldObserve(tc.annotations); got != tc.want {
+				t.Errorf("shouldObserve() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseObserveMode(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "", want: ObserveModeOptOut},
+		{in: "opt-out", want: ObserveModeOptOut},
+		{in: "opt-in", want: ObserveModeOptIn},
+		{in: "bogus", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := ParseObserveMode(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ParseObserveMode(%q) error = nil, want error", tc.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseObserveMode(%q) error = %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("ParseObserveMode(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplicationPredicate(t *testing.T) {
+	authorizedAnns := map[string]string{authorizedStageAnnotation: testNS + ":" + testStage}
+
+	t.Run("create", func(t *testing.T) {
+		r := &ApplicationReconciler{}
+		pred := r.applicationPredicate()
+
+		tests := []struct {
+			name string
+			app  *unstructured.Unstructured
+			want bool
+		}{
+			{name: "annotated admitted", app: testApp(authorizedAnns, nil), want: true},
+			{name: "unannotated rejected", app: testApp(nil, nil), want: false},
+			{
+				name: "ignored rejected",
+				app: testApp(map[string]string{
+					authorizedStageAnnotation: testNS + ":" + testStage,
+					ignoreAnnotation:          "true",
+				}, nil),
+				want: false,
+			},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := pred.Create(event.CreateEvent{Object: tc.app}); got != tc.want {
+					t.Errorf("Create() = %v, want %v", got, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		r := &ApplicationReconciler{}
+		pred := r.applicationPredicate()
+
+		oldApp := testApp(authorizedAnns, []string{testRepo + ":" + currentTag})
+
+		imageChanged := testApp(authorizedAnns, []string{testRepo + ":" + deployedTag})
+
+		annotationChanged := testApp(map[string]string{
+			authorizedStageAnnotation: testNS + ":" + testStage,
+			"example.com/other":       "value",
+		}, []string{testRepo + ":" + currentTag})
+
+		statusOnlyNoise := testApp(authorizedAnns, []string{testRepo + ":" + currentTag})
+		_ = unstructured.SetNestedField(statusOnlyNoise.Object, "Synced", "status", "sync", "status")
+
+		tests := []struct {
+			name string
+			old  *unstructured.Unstructured
+			new  *unstructured.Unstructured
+			want bool
+		}{
+			{name: "image change admitted", old: oldApp, new: imageChanged, want: true},
+			{name: "annotation change admitted", old: oldApp, new: annotationChanged, want: true},
+			{name: "status-only noise rejected", old: oldApp, new: statusOnlyNoise, want: false},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := pred.Update(event.UpdateEvent{ObjectOld: tc.old, ObjectNew: tc.new}); got != tc.want {
+					t.Errorf("Update() = %v, want %v", got, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("delete always false", func(t *testing.T) {
+		r := &ApplicationReconciler{}
+		pred := r.applicationPredicate()
+		if got := pred.Delete(event.DeleteEvent{Object: testApp(authorizedAnns, nil)}); got {
+			t.Errorf("Delete() = true, want false")
+		}
+	})
+
+	t.Run("opt-in mode", func(t *testing.T) {
+		r := &ApplicationReconciler{ObserveMode: ObserveModeOptIn}
+		pred := r.applicationPredicate()
+
+		unannotatedWithObserve := testApp(map[string]string{observeAnnotation: "true"}, nil)
+		optedIn := testApp(map[string]string{
+			authorizedStageAnnotation: testNS + ":" + testStage,
+			observeAnnotation:         "true",
+		}, nil)
+
+		if got := pred.Create(event.CreateEvent{Object: unannotatedWithObserve}); got {
+			t.Errorf("Create(unannotated-with-observe) = true, want false")
+		}
+		if got := pred.Create(event.CreateEvent{Object: optedIn}); !got {
+			t.Errorf("Create(opted-in) = false, want true")
+		}
+	})
+}
+
+func TestApplicationsForStage(t *testing.T) {
+	want := testNS + ":" + testStage
+
+	optedInApp := testApp(map[string]string{
+		authorizedStageAnnotation: want,
+		observeAnnotation:         "true",
+	}, nil)
+	optedInApp.SetName("opted-in-app")
+
+	notOptedInApp := testApp(map[string]string{authorizedStageAnnotation: want}, nil)
+	notOptedInApp.SetName("not-opted-in-app")
+
+	ignoredApp := testApp(map[string]string{
+		authorizedStageAnnotation: want,
+		ignoreAnnotation:          "true",
+	}, nil)
+	ignoredApp.SetName("ignored-app")
+
+	unrelatedApp := testApp(map[string]string{authorizedStageAnnotation: "other-ns:other-stage"}, nil)
+	unrelatedApp.SetName("unrelated-app")
+
+	sch := newTestScheme(t)
+	cl := fake.NewClientBuilder().WithScheme(sch).
+		WithObjects(optedInApp, notOptedInApp, ignoredApp, unrelatedApp).
+		Build()
+	stage := testStageObj(currentTag, false)
+
+	tests := []struct {
+		name        string
+		observeMode string
+		wantNames   []string
+	}{
+		{name: "opt-out mode enqueues all but ignored", observeMode: ObserveModeOptOut, wantNames: []string{"not-opted-in-app", "opted-in-app"}},
+		{name: "opt-in mode enqueues only opted-in", observeMode: ObserveModeOptIn, wantNames: []string{"opted-in-app"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &ApplicationReconciler{Client: cl, Scheme: sch, ObserveMode: tc.observeMode}
+			requests := r.applicationsForStage(context.Background(), stage)
+
+			var gotNames []string
+			for _, req := range requests {
+				if req.Namespace != testAppNS {
+					t.Errorf("request namespace = %q, want %q", req.Namespace, testAppNS)
+				}
+				gotNames = append(gotNames, req.Name)
+			}
+			sort.Strings(gotNames)
+			wantNames := append([]string(nil), tc.wantNames...)
+			sort.Strings(wantNames)
+			if !reflect.DeepEqual(gotNames, wantNames) {
+				t.Errorf("enqueued names = %v, want %v", gotNames, wantNames)
+			}
+		})
 	}
 }

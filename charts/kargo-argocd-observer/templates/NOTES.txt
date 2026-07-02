@@ -3,6 +3,13 @@
 The controller watches ArgoCD Applications annotated with
 kargo.akuity.io/authorized-stage and creates Kargo Promotions when the
 deployed image tags drift from the Stage's current Freight.
+{{- if eq .Values.observeMode "opt-in" }}
+
+OBSERVE MODE is opt-in: only Applications additionally annotated
+kargo-observer.kutlak.cc/observe: "true" are acted on. Annotate the
+Applications you want observed, then switch to opt-out to observe
+everything (unless ignored) with --set observeMode=opt-out.
+{{- end }}
 {{- if .Values.dryRun }}
 
 DRY-RUN is ON: the controller only logs intended Promotions and emits

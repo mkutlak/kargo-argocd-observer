@@ -31,6 +31,7 @@ func main() {
 		probeAddr   string
 		leaderElect bool
 		dryRun      bool
+		observeMode string
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metrics endpoint binds to.")
@@ -40,16 +41,27 @@ func main() {
 		"Enable leader election for the controller manager.")
 	flag.BoolVar(&dryRun, "dry-run", false,
 		"Log and emit events instead of creating Promotions.")
+	flag.StringVar(&observeMode, "observe-mode", controller.ObserveModeOptOut,
+		"Which annotated Applications to act on: 'opt-out' observes all unless ignored; "+
+			"'opt-in' additionally requires the kargo-observer.kutlak.cc/observe=\"true\" annotation.")
 	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
 	setupLog := ctrl.Log.WithName("setup")
+
+	observeMode, err := controller.ParseObserveMode(observeMode)
+	if err != nil {
+		setupLog.Error(err, "invalid --observe-mode")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting kargo-argocd-observer",
 		"version", version.Version,
 		"buildDate", version.BuildDate,
 		"buildRef", version.BuildRef,
+		"observeMode", observeMode,
 	)
 
 	// Periodic resync backstop: re-reconciles all Applications even when an
@@ -74,8 +86,9 @@ func main() {
 		Scheme: mgr.GetScheme(),
 		// The corev1 events API keeps the reconciler on record.EventRecorder,
 		// which record.NewFakeRecorder can stand in for in tests.
-		Recorder: mgr.GetEventRecorderFor("kargo-argocd-observer"), //nolint:staticcheck // SA1019: deliberate, see above
-		DryRun:   dryRun,
+		Recorder:    mgr.GetEventRecorderFor("kargo-argocd-observer"), //nolint:staticcheck // SA1019: deliberate, see above
+		DryRun:      dryRun,
+		ObserveMode: observeMode,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to set up controller", "controller", "Application")

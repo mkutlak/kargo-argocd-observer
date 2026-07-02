@@ -17,7 +17,11 @@ Promotions*; it never touches Stage status directly.
    annotation Kargo's ArgoCD integration already requires before a Stage may manage an
    Application. If Kargo promotes to your Applications today, the annotation is already
    there, so there is zero additional per-application configuration. An `Application` can
-   opt out with `kargo-observer.kutlak.cc/ignore: "true"`.
+   opt out with `kargo-observer.kutlak.cc/ignore: "true"`. Running with
+   `--observe-mode=opt-in` inverts the default for everything else: only Applications
+   additionally annotated `kargo-observer.kutlak.cc/observe: "true"` are watched, which
+   is useful for scoping a rollout to a handful of Applications before trusting the
+   controller with everything.
 2. **Detect drift.** On reconcile, the controller reads the deployed image tags from the
    Application's `.status.summary.images` and compares them against the Stage's current
    view, `.status.freightHistory[0]`, restricted to the repositories subscribed to by the
