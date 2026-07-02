@@ -7,6 +7,10 @@ plugins:
   - - "@semantic-release/commit-analyzer"
     - preset: conventionalcommits
       releaseRules:
+        # chart-scoped commits never release the app — the chart has its own
+        # versioning via Chart.yaml and the release-chart workflow
+        - scope: chart
+          release: false
         - type: feat
           release: minor
         - type: fix
