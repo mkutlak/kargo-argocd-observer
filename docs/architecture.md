@@ -17,7 +17,7 @@ Promotions*; it never touches Stage status directly.
    annotation Kargo's ArgoCD integration already requires before a Stage may manage an
    Application. If Kargo promotes to your Applications today, the annotation is already
    there, so there is zero additional per-application configuration. An `Application` can
-   opt out with `kargo-observer.mkutlak.github.io/ignore: "true"`.
+   opt out with `kargo-observer.kutlak.cc/ignore: "true"`.
 2. **Detect drift.** On reconcile, the controller reads the deployed image tags from the
    Application's `.status.summary.images` and compares them against the Stage's current
    view, `.status.freightHistory[0]`, restricted to the repositories subscribed to by the
@@ -27,7 +27,7 @@ Promotions*; it never touches Stage status directly.
    namespace and looks for one whose images match *all* of the drifted repo:tag pairs.
 4. **Promote.** A match produces a `Promotion` (`generateName: <stage>-observer-`,
    labeled `app.kubernetes.io/managed-by=kargo-argocd-observer`,
-   `kargo-observer.mkutlak.github.io/stage`, `kargo-observer.mkutlak.github.io/freight`).
+   `kargo-observer.kutlak.cc/stage`, `kargo-observer.kutlak.cc/freight`).
    Kargo's admission webhook authorizes and executes it like any other Promotion; because
    the tag is already live in git, the promotion changes only Kargo's bookkeeping.
 5. **Guard against repeats.** The controller skips reconciliation while the Stage has a

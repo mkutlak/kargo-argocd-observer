@@ -34,12 +34,12 @@ Emitted on the `Stage` object:
 | Annotation | Applies to | Meaning |
 |---|---|---|
 | `kargo.akuity.io/authorized-stage: "<namespace>:<stage>"` | `Application` | Links the Application to its Kargo Stage; required by Kargo's own ArgoCD integration, so it is already present wherever Kargo manages the Application |
-| `kargo-observer.mkutlak.github.io/ignore: "true"` | `Application` | Opts the Application out of observation |
+| `kargo-observer.kutlak.cc/ignore: "true"` | `Application` | Opts the Application out of observation |
 
 ## Labels set on created Promotions
 
 | Label | Value |
 |---|---|
 | `app.kubernetes.io/managed-by` | `kargo-argocd-observer` |
-| `kargo-observer.mkutlak.github.io/stage` | The target Stage name |
-| `kargo-observer.mkutlak.github.io/freight` | The promoted Freight name |
+| `kargo-observer.kutlak.cc/stage` | The target Stage name |
+| `kargo-observer.kutlak.cc/freight` | The promoted Freight name |

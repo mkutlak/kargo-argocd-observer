@@ -61,7 +61,7 @@ func main() {
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
-		LeaderElectionID:       "kargo-argocd-observer.mkutlak.github.io",
+		LeaderElectionID:       "kargo-argocd-observer.kutlak.cc",
 		Cache:                  cache.Options{SyncPeriod: &syncPeriod},
 	})
 	if err != nil {

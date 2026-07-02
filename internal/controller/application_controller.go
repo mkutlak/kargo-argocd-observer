@@ -32,12 +32,12 @@ const (
 	// its value is "<namespace>:<stage>".
 	authorizedStageAnnotation = "kargo.akuity.io/authorized-stage"
 	// ignoreAnnotation opts an Application out of observation when set to "true".
-	ignoreAnnotation = "kargo-observer.mkutlak.github.io/ignore"
+	ignoreAnnotation = "kargo-observer.kutlak.cc/ignore"
 
 	managedByLabel = "app.kubernetes.io/managed-by"
 	managedByValue = "kargo-argocd-observer"
-	stageLabel     = "kargo-observer.mkutlak.github.io/stage"
-	freightLabel   = "kargo-observer.mkutlak.github.io/freight"
+	stageLabel     = "kargo-observer.kutlak.cc/stage"
+	freightLabel   = "kargo-observer.kutlak.cc/freight"
 )
 
 var (
