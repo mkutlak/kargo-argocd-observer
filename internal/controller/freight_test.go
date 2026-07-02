@@ -49,14 +49,46 @@ func TestPromotionGenerateName(t *testing.T) {
 	}
 }
 
+func TestNormalizeRepoURL(t *testing.T) {
+	tests := []struct {
+		repo string
+		want string
+	}{
+		{"nginx", "docker.io/library/nginx"},
+		{"library/nginx", "docker.io/library/nginx"},
+		{"docker.io/nginx", "docker.io/library/nginx"},
+		{"docker.io/library/nginx", "docker.io/library/nginx"},
+		{"index.docker.io/nginx", "docker.io/library/nginx"},
+		{"acme/web", "docker.io/acme/web"},
+		{"docker.io/acme/web", "docker.io/acme/web"},
+		{"registry.example.com/app", "registry.example.com/app"},
+		{"registry.example.com/acme/web", "registry.example.com/acme/web"},
+		{"localhost/app", "localhost/app"},
+		{"localhost:5000/app", "localhost:5000/app"},
+		{"registry:5000/app", "registry:5000/app"},
+		{"ghcr.io/org/app", "ghcr.io/org/app"},
+		{"quay.io/org/sub/app", "quay.io/org/sub/app"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		if got := normalizeRepoURL(tc.repo); got != tc.want {
+			t.Errorf("normalizeRepoURL(%q) = %q, want %q", tc.repo, got, tc.want)
+		}
+	}
+}
+
 func TestDeployedImages(t *testing.T) {
 	app := testApp(nil, []string{
 		testRepo + ":" + deployedTag,
+		"nginx:1.27",
 		"registry:5000/no-tag",
 		"pinned@sha256:deadbeef",
 	})
 	got := deployedImages(app)
-	want := map[string]string{testRepo: deployedTag}
+	want := map[string]string{
+		testRepo:                  deployedTag,
+		"docker.io/library/nginx": "1.27",
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("deployedImages() = %v, want %v", got, want)
 	}
@@ -118,6 +150,20 @@ func TestFreightMatches(t *testing.T) {
 
 	if freightMatches(testFreight("f5", deployedTag), warehouses, nil) {
 		t.Error("freightMatches() = true for empty drift, want false")
+	}
+
+	hubFreight := &unstructured.Unstructured{}
+	hubFreight.SetGroupVersionKind(freightGVK)
+	hubFreight.SetNamespace(testNS)
+	hubFreight.SetName("f-hub")
+	_ = unstructured.SetNestedMap(hubFreight.Object,
+		map[string]any{"kind": "Warehouse", "name": warehouseName}, "origin")
+	_ = unstructured.SetNestedSlice(hubFreight.Object, []any{
+		map[string]any{"repoURL": "docker.io/nginx", "tag": "1.27"},
+	}, "images")
+	hubDrift := map[string]string{"docker.io/library/nginx": "1.27"}
+	if !freightMatches(hubFreight, warehouses, hubDrift) {
+		t.Error("freightMatches() = false for cross-spelled Docker Hub repo, want true")
 	}
 }
 

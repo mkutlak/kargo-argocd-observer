@@ -39,6 +39,35 @@ func parseImageRef(ref string) (repo, tag string, ok bool) {
 	return ref[:i], ref[i+1:], true
 }
 
+// normalizeRepoURL canonicalizes Docker Hub references so "nginx",
+// "library/nginx", "docker.io/nginx", and "index.docker.io/nginx" all
+// compare equal as "docker.io/library/nginx". Non-Hub registries (first
+// path component containing "." or ":", or "localhost") pass through
+// unchanged. Lowercasing and digest handling are out of scope.
+func normalizeRepoURL(repo string) string {
+	if repo == "" {
+		return ""
+	}
+	i := strings.Index(repo, "/")
+	if i < 0 {
+		return "docker.io/library/" + repo
+	}
+	first, rest := repo[:i], repo[i+1:]
+	if first == "index.docker.io" {
+		first = "docker.io"
+	}
+	if first == "docker.io" {
+		if !strings.Contains(rest, "/") {
+			return "docker.io/library/" + rest
+		}
+		return "docker.io/" + rest
+	}
+	if !strings.Contains(first, ".") && !strings.Contains(first, ":") && first != "localhost" {
+		return "docker.io/" + repo
+	}
+	return repo
+}
+
 // deployedImages extracts repo->tag from an ArgoCD Application's
 // .status.summary.images.
 func deployedImages(app *unstructured.Unstructured) map[string]string {
@@ -46,7 +75,7 @@ func deployedImages(app *unstructured.Unstructured) map[string]string {
 	images := map[string]string{}
 	for _, ref := range refs {
 		if repo, tag, ok := parseImageRef(ref); ok {
-			images[repo] = tag
+			images[normalizeRepoURL(repo)] = tag
 		}
 	}
 	return images
@@ -94,7 +123,7 @@ func imagesFromList(v any) map[string]string {
 		repo, _ := img["repoURL"].(string)
 		tag, _ := img["tag"].(string)
 		if repo != "" && tag != "" {
-			images[repo] = tag
+			images[normalizeRepoURL(repo)] = tag
 		}
 	}
 	return images
@@ -131,7 +160,7 @@ func warehouseImageRepos(warehouse *unstructured.Unstructured) []string {
 		}
 		repo, _, _ := unstructured.NestedString(sub, "image", "repoURL")
 		if repo != "" {
-			repos = append(repos, repo)
+			repos = append(repos, normalizeRepoURL(repo))
 		}
 	}
 	return repos
