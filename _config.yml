@@ -1,0 +1,7 @@
+title: kargo-argocd-observer
+description: >-
+  Kubernetes controller that reconciles Kargo Stage state with what ArgoCD
+  actually deployed — hand-committed image bumps show up in Kargo instead of
+  leaving Stages stale.
+theme: jekyll-theme-cayman
+url: "https://kargo-observer.kutlak.cc"
