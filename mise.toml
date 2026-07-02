@@ -1,0 +1,95 @@
+# kargo-argocd-observer — task runner & tool versions (https://mise.jdx.dev)
+# List tasks:  mise tasks        Run a task:  mise run <task>
+# Provision the toolchain:  mise install
+
+[settings]
+lockfile = true
+minimum_release_age = "7d"
+
+# ── Tool versions ─────────────────────────────────────────────
+[tools]
+go            = "1.26.4"   # keep in sync with go.mod
+golangci-lint = "2"
+
+# ── Build metadata (injected into binaries / images) ──────────
+[env]
+BUILD_DATE    = "{{ exec(command='date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+BUILD_VERSION = "{{ exec(command='git describe --tags --always --dirty 2>/dev/null || echo dev') }}"
+BUILD_REF     = "{{ exec(command='git rev-parse --short HEAD 2>/dev/null || echo unknown') }}"
+
+# ══ Build ══════════════════════════════════════════════════════
+
+[tasks.build]
+description = "Build observer binary"
+run = "go build -o bin/observer ./cmd/observer"
+
+[tasks."build-static"]
+description = "Build static observer binary (matches Docker, CGO_ENABLED=0)"
+run = '''
+CGO_ENABLED=0 GOOS=linux go build \
+  -ldflags="-s -w \
+    -X github.com/mkutlak/kargo-argocd-observer/internal/version.Version=$BUILD_VERSION \
+    -X github.com/mkutlak/kargo-argocd-observer/internal/version.BuildDate=$BUILD_DATE \
+    -X github.com/mkutlak/kargo-argocd-observer/internal/version.BuildRef=$BUILD_REF" \
+  -o bin/observer ./cmd/observer
+'''
+
+[tasks.run]
+description = "Build and run the observer locally"
+depends = ["build"]
+run = "./bin/observer"
+
+# ══ Test ═══════════════════════════════════════════════════════
+
+[tasks.test]
+description = "Run tests with race detector"
+run = "go test -race -timeout 3m ./..."
+
+[tasks."test-cover"]
+description = "Run tests with HTML coverage report"
+run = [
+  "mkdir -p bin",
+  "go test -coverprofile=bin/coverage.out ./...",
+  "go tool cover -html=bin/coverage.out -o bin/coverage.html",
+  "echo 'Coverage report: bin/coverage.html'",
+]
+
+# ══ Quality ════════════════════════════════════════════════════
+
+[tasks.fmt]
+description = "Format code"
+run = "golangci-lint fmt ./..."
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.lint]
+description = "Lint code"
+run = "golangci-lint run ./..."
+
+[tasks.tidy]
+description = "Tidy module dependencies"
+run = "go mod tidy"
+
+[tasks.check]
+description = "Full quality gate (fmt + vet + lint + test)"
+run = ["mise run fmt", "mise run vet", "mise run lint", "mise run test"]
+
+# ══ Docker ═════════════════════════════════════════════════════
+
+[tasks."docker:build"]
+description = "Build observer Docker image"
+run = '''
+docker build \
+  --build-arg BUILD_DATE="$BUILD_DATE" \
+  --build-arg BUILD_VERSION="$BUILD_VERSION" \
+  --build-arg BUILD_REF="$BUILD_REF" \
+  -t kargo-argocd-observer:dev .
+'''
+
+# ══ Utilities ══════════════════════════════════════════════════
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -rf bin"

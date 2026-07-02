@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kargo-argocd-observer
+  namespace: kargo-observer
+  labels:
+    app.kubernetes.io/name: kargo-argocd-observer
+spec:
+  replicas: 2 # leader election active/standby
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kargo-argocd-observer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kargo-argocd-observer
+    spec:
+      serviceAccountName: kargo-argocd-observer
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kargo-argocd-observer
+          image: ghcr.io/mkutlak/kargo-argocd-observer:latest # TODO: pin a version in production
+          args:
+            - --leader-elect=true
+            - --dry-run=true # flip to false after validating intended promotions in logs
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

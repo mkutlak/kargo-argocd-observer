@@ -1,0 +1,42 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gocritic
+    - gosec
+    - bodyclose
+    - errname
+    - errorlint
+    - copyloopvar
+    - noctx
+    - unparam
+
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam        # too noisy for value types used across the codebase
+    gosec:
+      excludes:
+        - G115 # integer conversion overflow (too noisy for k8s API type churn)
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+          - errorlint
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

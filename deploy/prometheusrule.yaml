@@ -1,0 +1,33 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kargo-argocd-observer
+  namespace: kargo-observer
+  labels:
+    app.kubernetes.io/name: kargo-argocd-observer
+spec:
+  groups:
+    - name: kargo-observer.rules
+      rules:
+        - alert: KargoObserverFreightMissing
+          expr: max by (namespace, stage) (kargo_observer_freight_missing) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            description: "deployed tag has no matching Kargo Freight — check Warehouse discovery window / stable-line warehouse"
+
+        - alert: KargoObserverPromotionCreateErrors
+          expr: increase(kargo_observer_promotion_create_errors_total[30m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            description: "kargo-argocd-observer failed to create one or more Kargo Promotions in the last 30m"
+
+        - alert: KargoObserverAbsent
+          expr: absent(up{job="kargo-argocd-observer"}) == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            description: "kargo-argocd-observer target is not being scraped by Prometheus"

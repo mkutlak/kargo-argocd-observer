@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kargo-argocd-observer
+  labels:
+    app.kubernetes.io/name: kargo-argocd-observer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kargo-argocd-observer
+subjects:
+  - kind: ServiceAccount
+    name: kargo-argocd-observer
+    namespace: kargo-observer

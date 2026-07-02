@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kargo-argocd-observer
+  namespace: kargo-observer
+  labels:
+    app.kubernetes.io/name: kargo-argocd-observer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kargo-argocd-observer
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
