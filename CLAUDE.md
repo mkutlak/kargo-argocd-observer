@@ -56,14 +56,13 @@ mise run clean           # remove build artifacts
 | `cmd/observer/` | Manager entrypoint — flag parsing, leader election, health probes, metrics registration |
 | `internal/controller/` | Application reconciler and annotation predicate; unstructured helpers for reading deployed images, matching Freight, and building Promotions. Tests alongside source |
 | `internal/version/` | `Version`/`BuildDate`/`BuildRef` vars, injected at link time via `-ldflags` |
-| `deploy/` | Plain Kubernetes manifests — namespace, ServiceAccount/RBAC, Deployment, Service, ServiceMonitor, PrometheusRule |
-| `charts/` | Helm chart (`kargo-argocd-observer`) — templated equivalent of `deploy/`, published to GHCR as an OCI artifact |
+| `charts/` | Helm chart (`kargo-argocd-observer`) — namespace-agnostic manifests (ServiceAccount/RBAC, Deployment, Service, optional ServiceMonitor/PrometheusRule), published to GHCR as an OCI artifact |
 | `docs/` | Documentation — architecture, reference (flags/metrics/events), development, release |
 
 ## Agent Routing
 
 - Controller/reconciler changes → `executor` (sonnet); Go review → `code-reviewer` (opus)
-- Kubernetes manifests/RBAC (`deploy/`) → `executor` (sonnet); architecture → `architect` (opus)
+- Kubernetes manifests/RBAC (`charts/`) → `executor` (sonnet); architecture → `architect` (opus)
 - Bug investigation → `debugger` (sonnet) first, then `executor`
 - `controller-runtime`/`client-go`/ArgoCD/Kargo API docs → `document-specialist` with Context7 MCP
 

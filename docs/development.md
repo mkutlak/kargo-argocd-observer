@@ -34,7 +34,6 @@ mise run docker:build    # build the container image
 | `cmd/observer/` | Manager entrypoint — flag parsing, leader election, health probes, metrics registration |
 | `internal/controller/` | Application reconciler and annotation predicate; unstructured helpers for reading deployed images, matching Freight, and building Promotions |
 | `internal/version/` | `Version`/`BuildDate`/`BuildRef` vars, injected at link time via `-ldflags` |
-| `deploy/` | Plain Kubernetes manifests |
 | `charts/kargo-argocd-observer/` | Helm chart (published as an OCI artifact) |
 | `docs/` | This documentation |
 

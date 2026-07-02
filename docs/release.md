@@ -13,8 +13,8 @@ by conventional commits (`.releaserc.yml`): `fix:` bumps patch, `feat:` bumps mi
    `ghcr.io/mkutlak/kargo-argocd-observer` with semver tags, build provenance, and an
    SBOM attestation.
 
-Commits touching only `*.md`, `docs/**`, `deploy/**`, `.claude/**`, or `charts/**` do
-not trigger an application release.
+Commits touching only `*.md`, `docs/**`, `.claude/**`, or `charts/**` do not trigger an
+application release.
 
 ## Helm chart
 

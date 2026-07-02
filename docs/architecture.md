@@ -89,7 +89,8 @@ The controller needs:
   admission webhook via a `SubjectAccessReview`, not by the Kubernetes API server, and
   must be granted separately from the standard `create` verb on `promotions`.
 
-See `deploy/` or the Helm chart for the full `ClusterRole`/`ClusterRoleBinding`.
+See the Helm chart's `clusterrole.yaml` template for the full
+`ClusterRole`/`ClusterRoleBinding`.
 
 ## Limitations
 
