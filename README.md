@@ -119,6 +119,35 @@ See `deploy/` for the full `ClusterRole`/`ClusterRoleBinding`.
 
 ## Deployment
 
+### Helm
+
+A Helm chart lives in `charts/kargo-argocd-observer` and is published as an OCI
+artifact:
+
+```sh
+helm install kargo-argocd-observer oci://ghcr.io/mkutlak/charts/kargo-argocd-observer \
+  --namespace kargo-observer --create-namespace
+```
+
+Or straight from a local checkout:
+
+```sh
+helm install kargo-argocd-observer ./charts/kargo-argocd-observer \
+  --namespace kargo-observer --create-namespace
+```
+
+The chart defaults to observe-only mode; once the intended promotions in the logs
+match expectations, let it act for real:
+
+```sh
+helm upgrade kargo-argocd-observer oci://ghcr.io/mkutlak/charts/kargo-argocd-observer \
+  --namespace kargo-observer --reuse-values --set dryRun=false
+```
+
+See `charts/kargo-argocd-observer/README.md` for the full list of values.
+
+### Plain manifests
+
 Plain Kubernetes manifests live in `deploy/`: namespace `kargo-observer`, a 2-replica
 leader-elected `Deployment`, `ServiceAccount`/RBAC, `Service`, `ServiceMonitor`, and a
 `PrometheusRule` for `kargo_observer_freight_missing` and Promotion-create failures. The

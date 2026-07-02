@@ -39,6 +39,10 @@ mise run vet
 mise run lint
 mise run tidy            # go mod tidy
 
+# Helm
+mise run helm:lint       # lint the Helm chart
+mise run helm:template   # render the Helm chart (validate templating)
+
 # Build & Release
 mise run docker:build    # build the container image
 mise run clean           # remove build artifacts
@@ -52,6 +56,7 @@ mise run clean           # remove build artifacts
 | `internal/controller/` | Application reconciler and annotation predicate; unstructured helpers for reading deployed images, matching Freight, and building Promotions. Tests alongside source |
 | `internal/version/` | `Version`/`BuildDate`/`BuildRef` vars, injected at link time via `-ldflags` |
 | `deploy/` | Plain Kubernetes manifests — namespace, ServiceAccount/RBAC, Deployment, Service, ServiceMonitor, PrometheusRule |
+| `charts/` | Helm chart (`kargo-argocd-observer`) — templated equivalent of `deploy/`, published to GHCR as an OCI artifact |
 
 ## Agent Routing
 

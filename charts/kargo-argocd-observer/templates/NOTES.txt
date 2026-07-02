@@ -1,0 +1,24 @@
+{{ .Chart.Name }} {{ .Chart.Version }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+The controller watches ArgoCD Applications annotated with
+kargo.akuity.io/authorized-stage and creates Kargo Promotions when the
+deployed image tags drift from the Stage's current Freight.
+{{- if .Values.dryRun }}
+
+DRY-RUN is ON: the controller only logs intended Promotions and emits
+Events on Stages — it will NOT create anything.
+{{- else }}
+
+DRY-RUN is OFF: the controller WILL create Kargo Promotions on drift.
+{{- end }}
+
+Watch what it does:
+
+  kubectl -n {{ .Release.Namespace }} logs deployment/{{ include "kargo-argocd-observer.fullname" . }} -f
+  kubectl get events -A --field-selector reason=DryRunPromotionSkipped
+{{- if .Values.dryRun }}
+
+Once the intended promotions match expectations, let it act for real:
+
+  helm upgrade {{ .Release.Name }} <chart> --namespace {{ .Release.Namespace }} --reuse-values --set dryRun=false
+{{- end }}

@@ -1,0 +1,82 @@
+# kargo-argocd-observer Helm chart — default values
+# Override these in your own values file or via --set flags.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/mkutlak/kargo-argocd-observer
+  tag: ""  # defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Two replicas run as an active/standby pair via leader election.
+replicaCount: 2
+
+# Observe-only mode: log intended Promotions and emit Events instead of
+# creating them. Flip to false once the promotions the controller *would*
+# create (visible in logs and Stage Events) match expectations.
+dryRun: true
+
+# Leader election — required whenever replicaCount > 1 so only one replica
+# reconciles at a time.
+leaderElect: true
+
+# Additional command-line arguments appended to the container args.
+# Example:
+#   extraArgs:
+#     - --metrics-bind-address=:9090
+extraArgs: []
+
+serviceAccount:
+  create: true
+  name: ""  # defaults to the chart fullname when create is true
+
+rbac:
+  # Create the ClusterRole/ClusterRoleBinding (watch Applications, read Kargo
+  # resources, create Promotions, Kargo's virtual `promote` verb) and the
+  # namespaced leader-election Role/RoleBinding.
+  # Disable to manage RBAC out of band.
+  create: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+metrics:
+  service:
+    # Port the metrics Service exposes; the container always serves metrics
+    # on its `metrics` port (8080).
+    port: 8080
+
+  # ServiceMonitor and PrometheusRule require the Prometheus Operator CRDs
+  # (monitoring.coreos.com). Both are disabled by default so the chart
+  # installs cleanly on clusters without the operator.
+  serviceMonitor:
+    enabled: false
+    # How often Prometheus scrapes the metrics endpoint.
+    interval: 30s
+    # Extra labels added to the ServiceMonitor metadata, e.g. to match your
+    # Prometheus Operator's serviceMonitorSelector:
+    #   additionalLabels:
+    #     prometheus: kube-prometheus
+    additionalLabels: {}
+
+  prometheusRule:
+    enabled: false
+    # Extra labels added to the PrometheusRule metadata, e.g. to match your
+    # Prometheus Operator's ruleSelector.
+    additionalLabels: {}

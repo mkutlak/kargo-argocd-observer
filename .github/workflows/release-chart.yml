@@ -1,0 +1,62 @@
+name: Release Helm Chart
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "charts/**"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release-chart:
+    name: Release Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v2
+
+      - name: Read chart version
+        id: version
+        run: |
+          VERSION=$(yq '.version' charts/kargo-argocd-observer/Chart.yaml)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: tag-check
+        env:
+          TAG: "helm-v${{ steps.version.outputs.version }}"
+        run: |
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists, skipping release"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GHCR
+        if: steps.tag-check.outputs.exists == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "${GITHUB_TOKEN}" | helm registry login ghcr.io -u "${ACTOR}" --password-stdin
+
+      - name: Package and push Helm chart
+        if: steps.tag-check.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mise run helm:package
+          helm push kargo-argocd-observer-${VERSION}.tgz oci://ghcr.io/mkutlak/charts
+
+      - name: Create helm tag
+        if: steps.tag-check.outputs.exists == 'false'
+        env:
+          TAG: "helm-v${{ steps.version.outputs.version }}"
+        run: |
+          git tag "${TAG}"
+          git push origin "${TAG}"

@@ -1,0 +1,55 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kargo-argocd-observer.fullname" . }}
+  labels:
+    {{- include "kargo-argocd-observer.labels" . | nindent 4 }}
+rules:
+  # Watch ArgoCD Applications cluster-wide to detect the deployed version.
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Read Kargo's view of the world: Stages, Freight, Warehouses, and existing Promotions.
+  - apiGroups:
+      - kargo.akuity.io
+    resources:
+      - stages
+      - freights
+      - warehouses
+      - promotions
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Create Promotions when drift between ArgoCD and Kargo is detected.
+  - apiGroups:
+      - kargo.akuity.io
+    resources:
+      - promotions
+    verbs:
+      - create
+
+  # Kargo's admission webhook SubjectAccessReview-checks this virtual verb when a Promotion is created
+  - apiGroups:
+      - kargo.akuity.io
+    resources:
+      - stages
+    verbs:
+      - promote
+
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+{{- end }}

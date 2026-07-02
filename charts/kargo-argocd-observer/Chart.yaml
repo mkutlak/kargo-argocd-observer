@@ -1,0 +1,21 @@
+apiVersion: v2
+name: kargo-argocd-observer
+description: Kubernetes controller that reconciles Kargo Stage state with what ArgoCD actually deployed
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/mkutlak/kargo-argocd-observer
+sources:
+  - https://github.com/mkutlak/kargo-argocd-observer
+maintainers:
+  - name: mkutlak
+keywords:
+  - kargo
+  - argocd
+  - gitops
+  - promotion
+  - controller
+annotations:
+  artifacthub.io/links: |
+    - name: Source
+      url: https://github.com/mkutlak/kargo-argocd-observer
