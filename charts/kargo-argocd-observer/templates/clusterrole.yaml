@@ -3,6 +3,10 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ include "kargo-argocd-observer.fullname" . }}
+  {{- with (include "kargo-argocd-observer.commonAnnotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
   labels:
     {{- include "kargo-argocd-observer.labels" . | nindent 4 }}
 rules:
@@ -52,4 +56,7 @@ rules:
     verbs:
       - create
       - patch
+  {{- with .Values.rbac.extraRules }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
 {{- end }}

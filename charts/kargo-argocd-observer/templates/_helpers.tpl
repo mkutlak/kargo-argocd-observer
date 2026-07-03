@@ -40,6 +40,25 @@ helm.sh/chart: {{ include "kargo-argocd-observer.chart" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- with .Values.commonLabels }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Common annotations, merged onto every resource's metadata when set. Renders as a
+raw YAML mapping fragment (no "annotations:" key) so callers can combine it with
+resource-specific annotations before deciding whether to render the key at all,
+e.g.:
+  {{- with (include "kargo-argocd-observer.commonAnnotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+*/}}
+{{- define "kargo-argocd-observer.commonAnnotations" -}}
+{{- with .Values.commonAnnotations }}
+{{- toYaml . }}
+{{- end }}
 {{- end }}
 
 {{/*

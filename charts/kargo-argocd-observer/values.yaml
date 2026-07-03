@@ -4,6 +4,13 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# Labels/annotations merged onto every resource this chart creates (Deployment,
+# Service, ServiceAccount, RBAC, ServiceMonitor, PrometheusRule, PodDisruptionBudget).
+# Resource-specific annotations (e.g. serviceAccount.annotations, service.annotations)
+# take precedence over commonAnnotations on key conflicts.
+commonLabels: {}
+commonAnnotations: {}
+
 image:
   repository: ghcr.io/mkutlak/kargo-argocd-observer
   tag: ""  # defaults to Chart.appVersion
@@ -29,22 +36,43 @@ observeMode: opt-in
 # reconciles at a time.
 leaderElect: true
 
-# Additional command-line arguments appended to the container args.
-# Example:
+# Additional command-line arguments appended to the container args, after the
+# ones templated from the values below. Example:
 #   extraArgs:
-#     - --metrics-bind-address=:9090
+#     - --zap-time-encoding=iso8601
 extraArgs: []
+
+# Zap logging flags. Each is only appended to the container args when set —
+# leave empty to fall back to the binary's own defaults.
+logging:
+  # e.g. debug, info, error (or a Zap numeric level such as "-1")
+  level: ""
+  # e.g. json, console
+  encoder: ""
+  # Zap development mode (stack traces on warn, console encoder, etc).
+  devMode: ""
 
 serviceAccount:
   create: true
   name: ""  # defaults to the chart fullname when create is true
+  annotations: {}
+  # Disabling this stops the token from being auto-mounted into the pod.
+  automountServiceAccountToken: true
 
 rbac:
-  # Create the ClusterRole/ClusterRoleBinding (watch Applications, read Kargo
-  # resources, create Promotions, Kargo's virtual `promote` verb) and the
-  # namespaced leader-election Role/RoleBinding.
-  # Disable to manage RBAC out of band.
+  # Create the ClusterRole/ClusterRoleBinding: watch Applications, read Kargo
+  # resources, create Promotions, and Kargo's virtual `promote` verb.
+  # Disable to manage this RBAC out of band.
   create: true
+  # Extra PolicyRules appended to the ClusterRole — e.g. to further restrict or
+  # extend the cluster-wide `promote` verb grant. True namespace-scoped RBAC
+  # needs a controller-side change (see docs/reference.md follow-up note).
+  extraRules: []
+  leaderElection:
+    # Create the namespaced Role/RoleBinding needed for leader election.
+    # Independent of rbac.create so you can manage cluster RBAC out of band
+    # while still letting the chart manage the namespaced leader-election RBAC.
+    create: true
 
 resources:
   requests:
@@ -79,12 +107,88 @@ containerSecurityContext:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+# Spread the active/standby pair across zones/nodes, e.g.:
+#   topologySpreadConstraints:
+#     - maxSkew: 1
+#       topologyKey: topology.kubernetes.io/zone
+#       whenUnsatisfiable: ScheduleAnyway
+#       labelSelector:
+#         matchLabels:
+#           app.kubernetes.io/name: kargo-argocd-observer
+topologySpreadConstraints: []
 priorityClassName: ""
 
+# terminationGracePeriodSeconds: 30
+terminationGracePeriodSeconds:
+# revisionHistoryLimit: 10
+revisionHistoryLimit:
+# RollingUpdate maxSurge/maxUnavailable, e.g.:
+#   strategy:
+#     type: RollingUpdate
+#     rollingUpdate:
+#       maxSurge: 1
+#       maxUnavailable: 0
+strategy: {}
+
+# Extra env vars / envFrom / volumes / volumeMounts — e.g. to mount a custom CA
+# bundle under readOnlyRootFilesystem: true.
+extraEnvVars: []
+envFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+# Probes default to the health port (below) and the controller's own
+# /healthz and /readyz endpoints. initialDelaySeconds/periodSeconds/
+# timeoutSeconds/failureThreshold/successThreshold are only rendered when set.
+livenessProbe:
+  path: /healthz
+  port: health
+  initialDelaySeconds:
+  periodSeconds:
+  timeoutSeconds:
+  failureThreshold:
+  successThreshold:
+
+readinessProbe:
+  path: /readyz
+  port: health
+  initialDelaySeconds:
+  periodSeconds:
+  timeoutSeconds:
+  failureThreshold:
+  successThreshold:
+
+# Disabled by default. Set any field (e.g. startupProbe.periodSeconds=5) to
+# render a startupProbe; path/port default to /healthz and the health port.
+startupProbe: {}
+
+# ClusterIP Service fronting the metrics port.
+service:
+  type: ClusterIP
+  annotations: {}
+  # e.g. the operator-less scrape annotation instead of a ServiceMonitor:
+  #   annotations:
+  #     prometheus.io/scrape: "true"
+  #     prometheus.io/port: "8080"
+  labels: {}
+
+# Voluntary-disruption budget for the active/standby pair. Enabled by default
+# so a node drain can't take down both replicas at once. minAvailable and
+# maxUnavailable are mutually exclusive — setting maxUnavailable overrides
+# minAvailable.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  # maxUnavailable: 1
+
 metrics:
+  # Port the container's Prometheus metrics endpoint binds to
+  # (--metrics-bind-address).
+  port: 8080
+
   service:
-    # Port the metrics Service exposes; the container always serves metrics
-    # on its `metrics` port (8080).
+    # Port the metrics Service exposes; defaults to the same value as
+    # metrics.port above.
     port: 8080
 
   # ServiceMonitor and PrometheusRule require the Prometheus Operator CRDs
@@ -94,6 +198,16 @@ metrics:
     enabled: false
     # How often Prometheus scrapes the metrics endpoint.
     interval: 30s
+    # Per-scrape timeout; must be smaller than interval when set.
+    scrapeTimeout: ""
+    # relabelings run before scraping (target relabeling).
+    relabelings: []
+    # metricRelabelings run after scraping, on the scraped samples.
+    metricRelabelings: []
+    # Restrict which namespaces the ServiceMonitor is allowed to select
+    # Services from (Prometheus Operator namespaceSelector).
+    namespaceSelector: {}
+    honorLabels: false
     # Extra labels added to the ServiceMonitor metadata, e.g. to match your
     # Prometheus Operator's serviceMonitorSelector:
     #   additionalLabels:
@@ -105,3 +219,39 @@ metrics:
     # Extra labels added to the PrometheusRule metadata, e.g. to match your
     # Prometheus Operator's ruleSelector.
     additionalLabels: {}
+
+    # Fires when a deployed tag has no matching Kargo Freight.
+    freightMissing:
+      enabled: true
+      for: 15m
+      threshold: 0
+      severity: warning
+
+    # Fires when the controller fails to create one or more Promotions.
+    promotionCreateErrors:
+      enabled: true
+      # Evaluation window for the increase() query.
+      window: 30m
+      threshold: 0
+      severity: warning
+      # for: 5m
+
+    # Fires when Prometheus can't scrape the controller at all.
+    absent:
+      enabled: true
+      for: 15m
+      severity: warning
+
+    # Custom alerting rules appended to the same rule group, e.g.:
+    #   extraRules:
+    #     - alert: MyCustomAlert
+    #       expr: up{job="kargo-argocd-observer"} == 0
+    #       for: 5m
+    #       labels:
+    #         severity: critical
+    extraRules: []
+
+# Port the container's health/liveness/readiness endpoint binds to
+# (--health-probe-bind-address).
+health:
+  port: 8081

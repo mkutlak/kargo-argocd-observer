@@ -3,6 +3,10 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: {{ include "kargo-argocd-observer.fullname" . }}
+  {{- with (include "kargo-argocd-observer.commonAnnotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
   labels:
     {{- include "kargo-argocd-observer.labels" . | nindent 4 }}
     {{- with .Values.metrics.prometheusRule.additionalLabels }}
@@ -12,26 +16,38 @@ spec:
   groups:
     - name: kargo-observer.rules
       rules:
+        {{- if .Values.metrics.prometheusRule.freightMissing.enabled }}
         - alert: KargoObserverFreightMissing
-          expr: max by (namespace, stage) (kargo_observer_freight_missing) > 0
-          for: 15m
+          expr: max by (namespace, stage) (kargo_observer_freight_missing) > {{ .Values.metrics.prometheusRule.freightMissing.threshold }}
+          for: {{ .Values.metrics.prometheusRule.freightMissing.for }}
           labels:
-            severity: warning
+            severity: {{ .Values.metrics.prometheusRule.freightMissing.severity }}
           annotations:
             description: "deployed tag has no matching Kargo Freight — check Warehouse discovery window / stable-line warehouse"
+        {{- end }}
 
+        {{- if .Values.metrics.prometheusRule.promotionCreateErrors.enabled }}
         - alert: KargoObserverPromotionCreateErrors
-          expr: increase(kargo_observer_promotion_create_errors_total[30m]) > 0
+          expr: increase(kargo_observer_promotion_create_errors_total[{{ .Values.metrics.prometheusRule.promotionCreateErrors.window }}]) > {{ .Values.metrics.prometheusRule.promotionCreateErrors.threshold }}
+          {{- with .Values.metrics.prometheusRule.promotionCreateErrors.for }}
+          for: {{ . }}
+          {{- end }}
           labels:
-            severity: warning
+            severity: {{ .Values.metrics.prometheusRule.promotionCreateErrors.severity }}
           annotations:
             description: "kargo-argocd-observer failed to create one or more Kargo Promotions in the last 30m"
+        {{- end }}
 
+        {{- if .Values.metrics.prometheusRule.absent.enabled }}
         - alert: KargoObserverAbsent
           expr: absent(up{job="{{ include "kargo-argocd-observer.fullname" . }}"}) == 1
-          for: 15m
+          for: {{ .Values.metrics.prometheusRule.absent.for }}
           labels:
-            severity: warning
+            severity: {{ .Values.metrics.prometheusRule.absent.severity }}
           annotations:
             description: "kargo-argocd-observer target is not being scraped by Prometheus"
+        {{- end }}
+        {{- with .Values.metrics.prometheusRule.extraRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
 {{- end }}

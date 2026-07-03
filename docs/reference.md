@@ -50,3 +50,14 @@ such as `nginx`.
 | `app.kubernetes.io/managed-by` | `kargo-argocd-observer` |
 | `kargo-observer.kutlak.cc/stage` | The target Stage name |
 | `kargo-observer.kutlak.cc/freight` | The promoted Freight name |
+
+## Known limitations (follow-ups)
+
+Not configurable from the Helm chart — both require a controller-side (Go) change:
+
+- **Cache resync period**: the 10-minute periodic reconcile backstop
+  (`cmd/observer/main.go`) is hardcoded; there's no `--sync-period` flag.
+- **Namespace-scoped RBAC**: the ClusterRole grants cluster-wide `get`/`list`/`watch`
+  on Applications and Kargo resources. `rbac.extraRules` in the chart can extend or
+  further restrict the grant, but true per-namespace scoping needs the controller's
+  cache/watches to become namespace-aware.

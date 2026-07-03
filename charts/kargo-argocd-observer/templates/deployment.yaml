@@ -5,10 +5,21 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "kargo-argocd-observer.fullname" . }}
+  {{- with (include "kargo-argocd-observer.commonAnnotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
   labels:
     {{- include "kargo-argocd-observer.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- with .Values.revisionHistoryLimit }}
+  revisionHistoryLimit: {{ . }}
+  {{- end }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "kargo-argocd-observer.selectorLabels" . | nindent 6 }}
@@ -32,6 +43,9 @@ spec:
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -39,29 +53,107 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --health-probe-bind-address=:{{ .Values.health.port }}
             - --leader-elect={{ .Values.leaderElect }}
             - --dry-run={{ .Values.dryRun }}
             - --observe-mode={{ .Values.observeMode }}
+            {{- with .Values.logging.level }}
+            - --zap-log-level={{ . }}
+            {{- end }}
+            {{- with .Values.logging.encoder }}
+            - --zap-encoder={{ . }}
+            {{- end }}
+            {{- with .Values.logging.devMode }}
+            - --zap-devel={{ . }}
+            {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . }}
             {{- end }}
+          {{- with .Values.extraEnvVars }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: metrics
-              containerPort: 8080
+              containerPort: {{ .Values.metrics.port }}
             - name: health
-              containerPort: 8081
+              containerPort: {{ .Values.health.port }}
           livenessProbe:
             httpGet:
-              path: /healthz
-              port: health
+              path: {{ .Values.livenessProbe.path }}
+              port: {{ .Values.livenessProbe.port }}
+            {{- with .Values.livenessProbe.initialDelaySeconds }}
+            initialDelaySeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.livenessProbe.periodSeconds }}
+            periodSeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.livenessProbe.timeoutSeconds }}
+            timeoutSeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.livenessProbe.failureThreshold }}
+            failureThreshold: {{ . }}
+            {{- end }}
+            {{- with .Values.livenessProbe.successThreshold }}
+            successThreshold: {{ . }}
+            {{- end }}
           readinessProbe:
             httpGet:
-              path: /readyz
-              port: health
+              path: {{ .Values.readinessProbe.path }}
+              port: {{ .Values.readinessProbe.port }}
+            {{- with .Values.readinessProbe.initialDelaySeconds }}
+            initialDelaySeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.readinessProbe.periodSeconds }}
+            periodSeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.readinessProbe.timeoutSeconds }}
+            timeoutSeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.readinessProbe.failureThreshold }}
+            failureThreshold: {{ . }}
+            {{- end }}
+            {{- with .Values.readinessProbe.successThreshold }}
+            successThreshold: {{ . }}
+            {{- end }}
+          {{- if .Values.startupProbe }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.startupProbe.path | default "/healthz" }}
+              port: {{ .Values.startupProbe.port | default "health" }}
+            {{- with .Values.startupProbe.initialDelaySeconds }}
+            initialDelaySeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.startupProbe.periodSeconds }}
+            periodSeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.startupProbe.timeoutSeconds }}
+            timeoutSeconds: {{ . }}
+            {{- end }}
+            {{- with .Values.startupProbe.failureThreshold }}
+            failureThreshold: {{ . }}
+            {{- end }}
+            {{- with .Values.startupProbe.successThreshold }}
+            successThreshold: {{ . }}
+            {{- end }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- with .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -72,5 +164,9 @@ spec:
       {{- end }}
       {{- with .Values.affinity }}
       affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
