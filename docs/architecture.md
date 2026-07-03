@@ -29,9 +29,13 @@ Promotions*; it never touches Stage status directly.
    this is what keeps the controller loop-free.
 3. **Find the matching Freight.** On drift, the controller lists `Freight` in the Stage's
    namespace and looks for one whose images match *all* of the drifted repo:tag pairs.
-4. **Promote.** A match produces a `Promotion` (`generateName: <stage>-observer-`,
-   labeled `app.kubernetes.io/managed-by=kargo-argocd-observer`,
-   `kargo-observer.kutlak.cc/stage`, `kargo-observer.kutlak.cc/freight`) carrying the
+4. **Promote.** A match produces a `Promotion` named `<stage>.<ulid>.<freight-prefix>`
+   — exactly Kargo's own naming scheme, and deliberately so: Kargo's stage controller
+   records a finished Promotion into freight history only when its name sorts lexically
+   after `status.lastPromotion.name`, an ordering guaranteed by the embedded
+   time-ordered ULID. The Promotion is labeled
+   `app.kubernetes.io/managed-by=kargo-argocd-observer`,
+   `kargo-observer.kutlak.cc/stage`, `kargo-observer.kutlak.cc/freight`, carrying the
    Stage's promotion template steps and variables — copied the same way Kargo's own API
    server builds Promotions, because Kargo's admission webhook rejects step-less
    Promotions rather than defaulting them from the Stage. The webhook then authorizes it,
@@ -62,8 +66,8 @@ compare deployed image tags (.status.summary.images)
    Freight found     no matching Freight
         │                │
         ▼                ▼
-  create Promotion    Event: FreightMissing
-  <stage>-observer-*  kargo_observer_freight_missing = 1
+  create Promotion         Event: FreightMissing
+  <stage>.<ulid>.<hash>    kargo_observer_freight_missing = 1
         │
         ▼
   Kargo admission webhook checks the `promote` verb,

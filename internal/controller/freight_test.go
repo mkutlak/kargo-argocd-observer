@@ -2,8 +2,10 @@ package controller
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -32,20 +34,38 @@ func TestParseImageRef(t *testing.T) {
 	}
 }
 
-func TestPromotionGenerateName(t *testing.T) {
-	if got := promotionGenerateName(testStage); got != testStage+"-observer-" {
-		t.Errorf("promotionGenerateName(%q) = %q, want %q", testStage, got, testStage+"-observer-")
+func TestPromotionName(t *testing.T) {
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	name := promotionName(testStage, freightName, now)
+
+	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(testStage) + `\.[0-9a-z]{26}\.` + regexp.QuoteMeta(freightName[:7]) + `$`)
+	if !pattern.MatchString(name) {
+		t.Errorf("promotionName = %q, want match for %s", name, pattern)
 	}
 
-	long := strings.Repeat("a", 80)
-	got := promotionGenerateName(long)
-	if !strings.HasSuffix(got, "-observer-") {
-		t.Errorf("promotionGenerateName(long) = %q, missing -observer- suffix", got)
+	// Kargo's stage controller only records promotions whose names sort
+	// lexically AFTER status.lastPromotion.name (its names embed a
+	// time-ordered ULID) — a name generated now must sort after a real
+	// Kargo-generated name from the past.
+	past := "qa-ox.01ktpewnchktjpafjxx7g5f152.15fa47a"
+	if got := promotionName("qa-ox", "15fa47acb13935bf9d820f8dc17ece41fc0ec053", now); got <= past {
+		t.Errorf("promotionName %q does not sort after past Kargo name %q", got, past)
 	}
-	// The generated name must stay a valid DNS label with the 5-char random
-	// suffix the API server appends.
-	if len(got)+5 > 63 {
-		t.Errorf("promotionGenerateName(long) = %q (len %d), exceeds 63 chars with random suffix", got, len(got))
+
+	// Later timestamps must sort after earlier ones.
+	if later := promotionName(testStage, freightName, now.Add(time.Second)); later <= name {
+		t.Errorf("later name %q does not sort after earlier %q", later, name)
+	}
+
+	// Long stage names are truncated to keep the whole name within the
+	// 253-char Kubernetes resource name limit, mirroring Kargo's builder.
+	if long := promotionName(strings.Repeat("a", 300), freightName, now); len(long) != 253 {
+		t.Errorf("promotionName(long stage) length = %d, want 253", len(long))
+	}
+
+	// Freight names shorter than the hash length are used as-is.
+	if short := promotionName(testStage, "abc", now); !strings.HasSuffix(short, ".abc") {
+		t.Errorf("promotionName with short freight = %q, want .abc suffix", short)
 	}
 }
 
@@ -86,6 +106,10 @@ func TestBuildPromotion(t *testing.T) {
 	gotVars, _, _ := unstructured.NestedSlice(p.Object, "spec", "vars")
 	if len(gotVars) != 1 {
 		t.Fatalf("spec.vars len = %d, want 1", len(gotVars))
+	}
+	if p.GetName() == "" || p.GetGenerateName() != "" {
+		t.Errorf("promotion must carry an explicit Kargo-style name, got name=%q generateName=%q",
+			p.GetName(), p.GetGenerateName())
 	}
 
 	p = buildPromotion("ns", "stg", "fr-1", steps, nil)

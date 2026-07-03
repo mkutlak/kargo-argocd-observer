@@ -9,8 +9,9 @@ the cluster runs the new version while Kargo keeps showing the stale one.
 deployed image tag no longer matches the Stage's current Freight, finds the Freight that
 corresponds to what is actually deployed, and creates a Kargo `Promotion` — the only
 supported way to move a Stage's state — so Kargo converges on reality. The Promotion is
-a **git no-op** (the tag is already in git); hand-bumps become auditable
-`<stage>-observer-*` entries in promotion history instead of invisible drift.
+a **git no-op** (the tag is already in git); hand-bumps become auditable promotion
+history entries — named like Kargo's own promotions and labeled
+`app.kubernetes.io/managed-by=kargo-argocd-observer` — instead of invisible drift.
 
 It requires zero per-application configuration: it keys off the
 `kargo.akuity.io/authorized-stage` annotation that Kargo's ArgoCD integration already

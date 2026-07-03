@@ -209,8 +209,11 @@ func TestReconcile(t *testing.T) {
 			wantGauge:        float64Ptr(0),
 			verify: func(t *testing.T, promotions []unstructured.Unstructured) {
 				p := promotions[0]
-				if !strings.HasPrefix(p.GetName(), testStage+"-observer-") {
-					t.Errorf("promotion name %q missing %q prefix", p.GetName(), testStage+"-observer-")
+				// Kargo-style <stage>.<ulid>.<freight> name — the stage
+				// controller ignores names that don't sort after
+				// status.lastPromotion.name.
+				if !strings.HasPrefix(p.GetName(), testStage+".") {
+					t.Errorf("promotion name %q missing Kargo-style %q prefix", p.GetName(), testStage+".")
 				}
 				gotStage, _, _ := unstructured.NestedString(p.Object, "spec", "stage")
 				gotFreight, _, _ := unstructured.NestedString(p.Object, "spec", "freight")
@@ -286,6 +289,19 @@ func TestReconcile(t *testing.T) {
 				testWarehouse(),
 				testFreight(freightName, deployedTag),
 				testPromotion("qa-observer-aaaaa", freightName, "Running"),
+			},
+			wantPromotions:   1,
+			wantNoEvents:     true,
+			wantRequeueAfter: 30 * time.Second,
+		},
+		{
+			name: "same freight already succeeded waits for stage to record",
+			app:  testApp(authorizedAnns, []string{deployedImage}),
+			objs: []client.Object{
+				testStageObj(currentTag, false),
+				testWarehouse(),
+				testFreight(freightName, deployedTag),
+				testPromotion("qa-observer-succeeded", freightName, "Succeeded"),
 			},
 			wantPromotions:   1,
 			wantNoEvents:     true,

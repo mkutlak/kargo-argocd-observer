@@ -202,11 +202,20 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
-	// A failed promotion for the same freight is a human problem: recreating
-	// it would just fail again. The failed Promotion must be deleted to retry.
-	if latest != nil {
-		if phase := promotionPhase(latest); (phase == phaseFailed || phase == phaseErrored) &&
-			latest.GetLabels()[freightLabel] == target.GetName() {
+	if latest != nil && latest.GetLabels()[freightLabel] == target.GetName() {
+		switch phase := promotionPhase(latest); phase {
+		case phaseSucceeded:
+			// Kargo already accepted this exact Freight; the Stage's freight
+			// history just hasn't recorded the result yet. Creating another
+			// Promotion would duplicate it — hold off and let the Stage
+			// catch up.
+			log.V(1).Info("promotion for this freight already succeeded, waiting for the stage to record it",
+				"promotion", latest.GetName())
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		case phaseFailed, phaseErrored:
+			// A failed promotion for the same freight is a human problem:
+			// recreating it would just fail again. The failed Promotion must
+			// be deleted to retry.
 			r.Recorder.Eventf(stage, corev1.EventTypeWarning, "PromotionPreviouslyFailed",
 				"promotion %s for freight %s ended in phase %s; delete it to let the observer retry",
 				latest.GetName(), target.GetName(), phase)

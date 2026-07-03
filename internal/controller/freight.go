@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"crypto/rand"
+	"math/big"
 	"sort"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -217,7 +220,7 @@ func buildPromotion(namespace, stage, freight string, steps, vars []any) *unstru
 	p := &unstructured.Unstructured{}
 	p.SetGroupVersionKind(promotionGVK)
 	p.SetNamespace(namespace)
-	p.SetGenerateName(promotionGenerateName(stage))
+	p.SetName(promotionName(stage, freight, time.Now()))
 	p.SetLabels(map[string]string{
 		managedByLabel: managedByValue,
 		stageLabel:     stage,
@@ -232,16 +235,50 @@ func buildPromotion(namespace, stage, freight string, steps, vars []any) *unstru
 	return p
 }
 
-// promotionGenerateName truncates the stage name so the generated Promotion
-// name (generateName + 5-char random suffix) stays within the 63-character
-// DNS label limit.
-func promotionGenerateName(stage string) string {
-	const suffix = "-observer-"
-	const randomSuffixLen = 5
-	if maxStage := 63 - len(suffix) - randomSuffixLen; len(stage) > maxStage {
-		stage = stage[:maxStage]
+// Kargo promotion-name layout, mirrored from Kargo's own promotion builder.
+// The stage controller records a finished Promotion into freight history only
+// when its name sorts lexically AFTER status.lastPromotion.name — an ordering
+// Kargo guarantees via the time-ordered ULID embedded in generated names. Any
+// other scheme (e.g. generateName with a random suffix) makes Kargo silently
+// ignore succeeded Promotions, and the observer would keep re-creating them.
+const (
+	promotionNameSeparator = "."
+	ulidLength             = 26
+	freightHashLength      = 7
+	maxStageNameLength     = 253 - 2*len(promotionNameSeparator) - ulidLength - freightHashLength
+)
+
+// promotionName renders <stage>.<ulid>.<freight-prefix> in lowercase, capped
+// at the 253-char Kubernetes resource name limit.
+func promotionName(stage, freight string, now time.Time) string {
+	if len(freight) > freightHashLength {
+		freight = freight[:freightHashLength]
 	}
-	return stage + suffix
+	if len(stage) > maxStageNameLength {
+		stage = stage[:maxStageNameLength]
+	}
+	return strings.ToLower(stage + promotionNameSeparator + newULID(now) + promotionNameSeparator + freight)
+}
+
+// newULID renders a ULID (48-bit millisecond timestamp + 80 random bits) in
+// Crockford base32: 26 chars whose lexical order equals creation-time order.
+func newULID(now time.Time) string {
+	const alphabet = "0123456789abcdefghjkmnpqrstvwxyz"
+	var b [16]byte
+	ms := uint64(now.UnixMilli()) //nolint:gosec // non-negative for any realistic clock
+	b[0], b[1], b[2] = byte(ms>>40), byte(ms>>32), byte(ms>>24)
+	b[3], b[4], b[5] = byte(ms>>16), byte(ms>>8), byte(ms)
+	// crypto/rand.Read is documented never to fail.
+	_, _ = rand.Read(b[6:])
+	n := new(big.Int).SetBytes(b[:])
+	base := big.NewInt(int64(len(alphabet)))
+	mod := new(big.Int)
+	out := make([]byte, ulidLength)
+	for i := ulidLength - 1; i >= 0; i-- {
+		n.DivMod(n, base, mod)
+		out[i] = alphabet[mod.Int64()]
+	}
+	return string(out)
 }
 
 func promotionPhase(promotion *unstructured.Unstructured) string {
