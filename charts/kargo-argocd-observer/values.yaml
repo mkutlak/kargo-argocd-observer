@@ -57,6 +57,25 @@ resources:
 podAnnotations: {}
 podLabels: {}
 
+# Pod-level security context. runAsUser/runAsGroup pin the distroless
+# image's nonroot user numerically (UID/GID 65532) — kubelet refuses to
+# verify runAsNonRoot against a symbolic user like "nonroot", so the
+# numeric IDs are required for the pod to be admitted.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
