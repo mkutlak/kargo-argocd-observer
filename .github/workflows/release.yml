@@ -15,6 +15,7 @@ on:
       - "docs/**"
       - "charts/**"
       - ".claude/**"
+      - ".github/**"
 
 permissions:
   contents: write
