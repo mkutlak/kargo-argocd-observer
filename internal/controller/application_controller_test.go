@@ -176,6 +176,63 @@ func eventsContain(events []string, substr string) bool {
 
 func float64Ptr(v float64) *float64 { return &v }
 
+func TestStagePredicate(t *testing.T) {
+	base := testStageObj(currentTag, false)
+
+	tests := []struct {
+		name   string
+		mutate func(stage *unstructured.Unstructured)
+		want   bool
+	}{
+		{
+			name: "status noise (health) is filtered",
+			mutate: func(s *unstructured.Unstructured) {
+				_ = unstructured.SetNestedField(s.Object, "Degraded", "status", "health")
+			},
+			want: false,
+		},
+		{
+			name: "freight history change fans out",
+			mutate: func(s *unstructured.Unstructured) {
+				_ = unstructured.SetNestedSlice(s.Object, []any{
+					map[string]any{"items": map[string]any{}},
+				}, "status", "freightHistory")
+			},
+			want: true,
+		},
+		{
+			name: "current promotion change fans out",
+			mutate: func(s *unstructured.Unstructured) {
+				_ = unstructured.SetNestedMap(s.Object, map[string]any{"name": "p"}, "status", "currentPromotion")
+			},
+			want: true,
+		},
+		{
+			name:   "spec change (generation bump) fans out",
+			mutate: func(s *unstructured.Unstructured) { s.SetGeneration(base.GetGeneration() + 1) },
+			want:   true,
+		},
+	}
+	pred := stagePredicate()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			newStage := base.DeepCopy()
+			tc.mutate(newStage)
+			got := pred.Update(event.UpdateEvent{ObjectOld: base.DeepCopy(), ObjectNew: newStage})
+			if got != tc.want {
+				t.Errorf("stagePredicate update = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	if !pred.Create(event.CreateEvent{Object: base.DeepCopy()}) {
+		t.Error("stagePredicate must admit create events")
+	}
+	if pred.Delete(event.DeleteEvent{Object: base.DeepCopy()}) {
+		t.Error("stagePredicate must filter delete events")
+	}
+}
+
 func TestReconcile(t *testing.T) {
 	authorizedAnns := map[string]string{
 		authorizedStageAnnotation: testNS + ":" + testStage,

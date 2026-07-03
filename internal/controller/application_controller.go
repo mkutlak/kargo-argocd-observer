@@ -163,7 +163,10 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		freightMissing.WithLabelValues(stageNS, stageName).Set(0)
 		return ctrl.Result{}, nil
 	}
-	log.Info("deployed images diverge from stage's current freight", "drift", formatDrift(drifted))
+	// Drift alone is V(1): the same divergence is re-detected on every
+	// reconcile until the Stage records the promotion. Action paths below
+	// (create / dry-run / events) carry the drift at Info level.
+	log.V(1).Info("deployed images diverge from stage's current freight", "drift", formatDrift(drifted))
 
 	// Kargo cannot promote to a Stage without promotion template steps; the
 	// admission webhook would reject every Promotion the observer creates.
@@ -227,7 +230,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if r.DryRun {
 		r.Recorder.Eventf(stage, corev1.EventTypeNormal, "DryRunPromotionSkipped",
 			"dry-run: would promote freight %s (%s)", target.GetName(), formatDrift(drifted))
-		log.Info("dry-run: would create promotion", "freight", target.GetName())
+		log.Info("dry-run: would create promotion", "freight", target.GetName(), "drift", formatDrift(drifted))
 		return ctrl.Result{}, nil
 	}
 
@@ -245,7 +248,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		"created promotion %s for freight %s (%s)", promotion.GetName(), target.GetName(), formatDrift(drifted))
 	promotionsCreatedTotal.WithLabelValues(stageNS, stageName).Inc()
 	freightMissing.WithLabelValues(stageNS, stageName).Set(0)
-	log.Info("created promotion", "promotion", promotion.GetName(), "freight", target.GetName())
+	log.Info("created promotion", "promotion", promotion.GetName(), "freight", target.GetName(), "drift", formatDrift(drifted))
 	return ctrl.Result{RequeueAfter: time.Minute}, nil
 }
 
@@ -330,8 +333,41 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("kargo-argocd-observer").
 		For(app, builder.WithPredicates(r.applicationPredicate())).
-		Watches(stage, handler.EnqueueRequestsFromMapFunc(r.applicationsForStage)).
+		Watches(stage,
+			handler.EnqueueRequestsFromMapFunc(r.applicationsForStage),
+			builder.WithPredicates(stagePredicate())).
 		Complete(r)
+}
+
+// stagePredicate reduces Stage fan-out to the changes the observer acts on:
+// the spec (via generation), the recorded freight history, and the in-flight
+// promotion pointer. Kargo touches Stage status constantly (health checks,
+// verification bookkeeping); without this filter every touch would
+// re-reconcile every Application attached to the Stage.
+func stagePredicate() predicate.Funcs {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return true },
+		DeleteFunc:  func(event.DeleteEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
+				return true
+			}
+			oldStage, okOld := e.ObjectOld.(*unstructured.Unstructured)
+			newStage, okNew := e.ObjectNew.(*unstructured.Unstructured)
+			if !okOld || !okNew {
+				return true
+			}
+			oldHistory, _, _ := unstructured.NestedSlice(oldStage.Object, "status", "freightHistory")
+			newHistory, _, _ := unstructured.NestedSlice(newStage.Object, "status", "freightHistory")
+			if !reflect.DeepEqual(oldHistory, newHistory) {
+				return true
+			}
+			oldPromo, _, _ := unstructured.NestedMap(oldStage.Object, "status", "currentPromotion")
+			newPromo, _, _ := unstructured.NestedMap(newStage.Object, "status", "currentPromotion")
+			return !reflect.DeepEqual(oldPromo, newPromo)
+		},
+	}
 }
 
 // applicationPredicate admits Applications carrying the authorized-stage
