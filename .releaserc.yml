@@ -6,27 +6,17 @@ tagFormat: "v${version}"
 plugins:
   - - "@semantic-release/commit-analyzer"
     - preset: conventionalcommits
+      # CAUTION: when several releaseRules match one commit, the HIGHEST
+      # release type wins — rules are NOT first-match-wins. Never re-declare
+      # the default type rules (feat->minor, fix/perf/revert->patch) here:
+      # a redundant `type: feat` rule overrode the chart exclusion below and
+      # released feat(chart) commits as app minors (that is how 0.4.0
+      # happened). Commits matching no rule fall through to those defaults;
+      # chore/docs/etc. release nothing by default.
       releaseRules:
         # chart-scoped commits never release the app — the chart has its own
         # versioning via Chart.yaml and the release-chart workflow
         - scope: chart
-          release: false
-        - type: feat
-          release: minor
-        - type: fix
-          release: patch
-        - type: perf
-          release: patch
-        - type: revert
-          release: patch
-        - type: chore
-          scope: deps
-          release: false
-        - type: chore
-          scope: docker
-          release: false
-        - type: chore
-          scope: ci
           release: false
   - - "@semantic-release/release-notes-generator"
     - preset: conventionalcommits

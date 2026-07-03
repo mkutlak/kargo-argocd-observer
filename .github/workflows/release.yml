@@ -67,10 +67,13 @@ jobs:
         id: semantic
         uses: cycjimmy/semantic-release-action@v6
         with:
+          # Pinned: unpinned conventional-changelog-conventionalcommits pulls
+          # the latest major (v10+), which is incompatible with the bundled
+          # release-notes-generator and silently renders EMPTY release notes.
           extra_plugins: |
-            @semantic-release/changelog
-            @semantic-release/git
-            conventional-changelog-conventionalcommits
+            @semantic-release/changelog@6
+            @semantic-release/git@10
+            conventional-changelog-conventionalcommits@8.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
