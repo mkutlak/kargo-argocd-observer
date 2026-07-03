@@ -165,6 +165,17 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	log.Info("deployed images diverge from stage's current freight", "drift", formatDrift(drifted))
 
+	// Kargo cannot promote to a Stage without promotion template steps; the
+	// admission webhook would reject every Promotion the observer creates.
+	steps := stagePromotionSteps(stage)
+	if len(steps) == 0 {
+		r.Recorder.Eventf(stage, corev1.EventTypeWarning, "StageHasNoPromotionSteps",
+			"stage defines no promotion template steps; cannot create a Promotion to align it with deployed images %s",
+			formatDrift(drifted))
+		log.Info("stage has no promotion template steps, skipping")
+		return ctrl.Result{}, nil
+	}
+
 	// Never race an in-flight promotion, whoever created it.
 	if current, found, _ := unstructured.NestedMap(stage.Object, "status", "currentPromotion"); found && len(current) > 0 {
 		log.V(1).Info("stage has a promotion in progress, requeueing")
@@ -211,7 +222,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	promotion := buildPromotion(stageNS, stageName, target.GetName())
+	promotion := buildPromotion(stageNS, stageName, target.GetName(), steps, stagePromotionVars(stage))
 	if err := r.Create(ctx, promotion); err != nil {
 		r.Recorder.Eventf(stage, corev1.EventTypeWarning, "PromotionCreateFailed",
 			"creating promotion for freight %s failed: %v", target.GetName(), err)

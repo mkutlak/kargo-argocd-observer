@@ -77,6 +77,19 @@ func testStageObj(currentImageTag string, promotionInProgress bool) *unstructure
 			},
 		},
 	}, "status", "freightHistory")
+	_ = unstructured.SetNestedSlice(stage.Object, []any{
+		map[string]any{"name": "env", "value": "test"},
+	}, "spec", "vars")
+	_ = unstructured.SetNestedMap(stage.Object, map[string]any{
+		"spec": map[string]any{
+			"vars": []any{
+				map[string]any{"name": "flag", "value": "true"},
+			},
+			"steps": []any{
+				map[string]any{"task": map[string]any{"name": "sync-argo"}},
+			},
+		},
+	}, "spec", "promotionTemplate")
 	if promotionInProgress {
 		_ = unstructured.SetNestedMap(stage.Object,
 			map[string]any{"name": "someone-elses-promotion"}, "status", "currentPromotion")
@@ -217,6 +230,27 @@ func TestReconcile(t *testing.T) {
 				if labels[freightLabel] != freightName {
 					t.Errorf("label %s = %q, want %q", freightLabel, labels[freightLabel], freightName)
 				}
+				steps, _, _ := unstructured.NestedSlice(p.Object, "spec", "steps")
+				if len(steps) != 1 {
+					t.Fatalf("spec.steps len = %d, want 1 (copied from stage promotion template)", len(steps))
+				}
+				step, _ := steps[0].(map[string]any)
+				task, _, _ := unstructured.NestedString(step, "task", "name")
+				if task != "sync-argo" {
+					t.Errorf("spec.steps[0].task.name = %q, want %q", task, "sync-argo")
+				}
+				vars, _, _ := unstructured.NestedSlice(p.Object, "spec", "vars")
+				if len(vars) != 2 {
+					t.Fatalf("spec.vars len = %d, want 2 (stage vars then template vars)", len(vars))
+				}
+				firstVar, _ := vars[0].(map[string]any)
+				if firstVar["name"] != "env" {
+					t.Errorf("spec.vars[0].name = %v, want env (stage vars first)", firstVar["name"])
+				}
+				secondVar, _ := vars[1].(map[string]any)
+				if secondVar["name"] != "flag" {
+					t.Errorf("spec.vars[1].name = %v, want flag (template vars second)", secondVar["name"])
+				}
 			},
 		},
 		{
@@ -280,6 +314,21 @@ func TestReconcile(t *testing.T) {
 			dryRun:         true,
 			wantPromotions: 0,
 			wantEvents:     []string{"DryRunPromotionSkipped"},
+		},
+		{
+			name: "stage without promotion steps emits event and skips",
+			app:  testApp(authorizedAnns, []string{deployedImage}),
+			objs: []client.Object{
+				func() client.Object {
+					stage := testStageObj(currentTag, false)
+					unstructured.RemoveNestedField(stage.Object, "spec", "promotionTemplate")
+					return stage
+				}(),
+				testWarehouse(),
+				testFreight(freightName, deployedTag),
+			},
+			wantPromotions: 0,
+			wantEvents:     []string{"StageHasNoPromotionSteps"},
 		},
 		{
 			name: "ignore annotation",

@@ -27,6 +27,7 @@ Emitted on the `Stage` object:
 | `PromotionCreated` | A Promotion was created to converge the Stage on the deployed tag |
 | `DryRunPromotionSkipped` | Drift detected; no Promotion created because `--dry-run` is set |
 | `FreightMissing` | No Freight matches the deployed tag |
+| `StageHasNoPromotionSteps` | The Stage defines no promotion template steps, so Kargo would reject any Promotion for it; add a `promotionTemplate` to the Stage or opt the Application out |
 | `PromotionPreviouslyFailed` | The controller already tried and failed to promote this Freight; delete the failed Promotion to retry |
 | `PromotionCreateFailed` | The Promotion create call itself failed |
 

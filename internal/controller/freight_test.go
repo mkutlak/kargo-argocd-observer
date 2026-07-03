@@ -49,6 +49,51 @@ func TestPromotionGenerateName(t *testing.T) {
 	}
 }
 
+func TestStagePromotionStepsAndVars(t *testing.T) {
+	stage := testStageObj(currentTag, false)
+	steps := stagePromotionSteps(stage)
+	if len(steps) != 1 {
+		t.Fatalf("stagePromotionSteps len = %d, want 1", len(steps))
+	}
+	vars := stagePromotionVars(stage)
+	if len(vars) != 2 {
+		t.Fatalf("stagePromotionVars len = %d, want 2", len(vars))
+	}
+	first, _ := vars[0].(map[string]any)
+	if first["name"] != "env" {
+		t.Errorf("vars[0].name = %v, want env (stage vars before template vars)", first["name"])
+	}
+
+	unstructured.RemoveNestedField(stage.Object, "spec", "promotionTemplate")
+	unstructured.RemoveNestedField(stage.Object, "spec", "vars")
+	if got := stagePromotionSteps(stage); len(got) != 0 {
+		t.Errorf("stagePromotionSteps on bare stage = %v, want empty", got)
+	}
+	if got := stagePromotionVars(stage); len(got) != 0 {
+		t.Errorf("stagePromotionVars on bare stage = %v, want empty", got)
+	}
+}
+
+func TestBuildPromotion(t *testing.T) {
+	steps := []any{map[string]any{"uses": "fake-step"}}
+	vars := []any{map[string]any{"name": "env", "value": "qa"}}
+
+	p := buildPromotion("ns", "stg", "fr-1", steps, vars)
+	gotSteps, _, _ := unstructured.NestedSlice(p.Object, "spec", "steps")
+	if len(gotSteps) != 1 {
+		t.Fatalf("spec.steps len = %d, want 1", len(gotSteps))
+	}
+	gotVars, _, _ := unstructured.NestedSlice(p.Object, "spec", "vars")
+	if len(gotVars) != 1 {
+		t.Fatalf("spec.vars len = %d, want 1", len(gotVars))
+	}
+
+	p = buildPromotion("ns", "stg", "fr-1", steps, nil)
+	if _, found, _ := unstructured.NestedSlice(p.Object, "spec", "vars"); found {
+		t.Error("spec.vars should be absent when the stage defines no vars")
+	}
+}
+
 func TestNormalizeRepoURL(t *testing.T) {
 	tests := []struct {
 		repo string

@@ -190,9 +190,30 @@ func freightMatches(freight *unstructured.Unstructured, warehouses map[string]st
 	return true
 }
 
+// stagePromotionSteps returns the Stage's promotion template steps
+// (.spec.promotionTemplate.spec.steps). Kargo's admission webhook rejects
+// Promotions whose own spec.steps is empty and does not default them from
+// the Stage — copying them is the creator's job, exactly as Kargo's API
+// server does for UI/CLI-created Promotions.
+func stagePromotionSteps(stage *unstructured.Unstructured) []any {
+	steps, _, _ := unstructured.NestedSlice(stage.Object, "spec", "promotionTemplate", "spec", "steps")
+	return steps
+}
+
+// stagePromotionVars returns the Stage's variables followed by its promotion
+// template's variables — the same order Kargo's own promotion builder uses,
+// so task steps resolve their inputs identically.
+func stagePromotionVars(stage *unstructured.Unstructured) []any {
+	vars, _, _ := unstructured.NestedSlice(stage.Object, "spec", "vars")
+	templateVars, _, _ := unstructured.NestedSlice(stage.Object, "spec", "promotionTemplate", "spec", "vars")
+	return append(vars, templateVars...)
+}
+
 // buildPromotion assembles the Promotion the observer creates to align
-// Kargo's view with what is actually deployed.
-func buildPromotion(namespace, stage, freight string) *unstructured.Unstructured {
+// Kargo's view with what is actually deployed. steps and vars are copied
+// from the Stage (see stagePromotionSteps/stagePromotionVars); the webhook
+// inflates task references and stamps the Stage's shard and owner reference.
+func buildPromotion(namespace, stage, freight string, steps, vars []any) *unstructured.Unstructured {
 	p := &unstructured.Unstructured{}
 	p.SetGroupVersionKind(promotionGVK)
 	p.SetNamespace(namespace)
@@ -204,6 +225,10 @@ func buildPromotion(namespace, stage, freight string) *unstructured.Unstructured
 	})
 	_ = unstructured.SetNestedField(p.Object, stage, "spec", "stage")
 	_ = unstructured.SetNestedField(p.Object, freight, "spec", "freight")
+	_ = unstructured.SetNestedSlice(p.Object, steps, "spec", "steps")
+	if len(vars) > 0 {
+		_ = unstructured.SetNestedSlice(p.Object, vars, "spec", "vars")
+	}
 	return p
 }
 

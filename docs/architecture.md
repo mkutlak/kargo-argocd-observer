@@ -31,9 +31,12 @@ Promotions*; it never touches Stage status directly.
    namespace and looks for one whose images match *all* of the drifted repo:tag pairs.
 4. **Promote.** A match produces a `Promotion` (`generateName: <stage>-observer-`,
    labeled `app.kubernetes.io/managed-by=kargo-argocd-observer`,
-   `kargo-observer.kutlak.cc/stage`, `kargo-observer.kutlak.cc/freight`).
-   Kargo's admission webhook authorizes and executes it like any other Promotion; because
-   the tag is already live in git, the promotion changes only Kargo's bookkeeping.
+   `kargo-observer.kutlak.cc/stage`, `kargo-observer.kutlak.cc/freight`) carrying the
+   Stage's promotion template steps and variables — copied the same way Kargo's own API
+   server builds Promotions, because Kargo's admission webhook rejects step-less
+   Promotions rather than defaulting them from the Stage. The webhook then authorizes it,
+   inflates task references, and stamps the Stage's shard; because the tag is already
+   live in git, the promotion changes only Kargo's bookkeeping.
 5. **Guard against repeats.** The controller skips reconciliation while the Stage has a
    Promotion in flight, and will not recreate a Promotion for a Freight it already tried
    and failed for — delete the failed Promotion to retry.
@@ -105,5 +108,8 @@ See the Helm chart's `clusterrole.yaml` template for the full
   Warehouse's discovery window, no Freight will match and the controller emits
   `FreightMissing` until a Warehouse discovers it (or a stable-line Warehouse is added).
 - Old Promotions are garbage-collected by Kargo itself, not by this controller.
+- Stages must define `promotionTemplate` steps — Kargo rejects Promotions for step-less
+  (control-flow) Stages, so the observer skips them with a `StageHasNoPromotionSteps`
+  Event.
 - Requires the `kargo.akuity.io/authorized-stage` annotation on Applications — present
   wherever Kargo's ArgoCD integration is in use.
