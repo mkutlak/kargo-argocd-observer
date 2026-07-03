@@ -36,6 +36,11 @@ observeMode: opt-in
 # reconciles at a time.
 leaderElect: true
 
+# Periodic resync backstop: how often the controller re-reconciles every
+# Application even when an event was missed (e.g. Freight produced after a
+# FreightMissing verdict). A Go duration string; must be positive.
+syncPeriod: 10m
+
 # Additional command-line arguments appended to the container args, after the
 # ones templated from the values below. Example:
 #   extraArgs:

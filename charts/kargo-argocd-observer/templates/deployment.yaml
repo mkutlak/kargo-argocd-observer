@@ -58,6 +58,7 @@ spec:
             - --leader-elect={{ .Values.leaderElect }}
             - --dry-run={{ .Values.dryRun }}
             - --observe-mode={{ .Values.observeMode }}
+            - --sync-period={{ .Values.syncPeriod }}
             {{- with .Values.logging.level }}
             - --zap-log-level={{ . }}
             {{- end }}

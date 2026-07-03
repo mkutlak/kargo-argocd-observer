@@ -59,6 +59,7 @@ rollout:
 | `dryRun` | `true` | Observe-only: log/emit Events instead of creating Promotions; flip to `false` to act |
 | `observeMode` | `opt-in` | Scoped rollout: `opt-in` only acts on Applications annotated `kargo-observer.kutlak.cc/observe: "true"`; `opt-out` acts on all annotated Applications unless ignored |
 | `leaderElect` | `true` | Enable leader election (required with >1 replica) |
+| `syncPeriod` | `10m` | Periodic resync backstop — how often all Applications are re-reconciled; must be positive |
 | `extraArgs` | `[]` | Extra command-line arguments appended after the templated ones |
 | `logging.level` | `""` | `--zap-log-level`; omitted when empty |
 | `logging.encoder` | `""` | `--zap-encoder`; omitted when empty |

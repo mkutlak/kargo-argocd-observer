@@ -3,6 +3,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -32,6 +33,7 @@ func main() {
 		leaderElect bool
 		dryRun      bool
 		observeMode string
+		syncPeriod  time.Duration
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metrics endpoint binds to.")
@@ -44,6 +46,9 @@ func main() {
 	flag.StringVar(&observeMode, "observe-mode", controller.ObserveModeOptOut,
 		"Which annotated Applications to act on: 'opt-out' observes all unless ignored; "+
 			"'opt-in' additionally requires the kargo-observer.kutlak.cc/observe=\"true\" annotation.")
+	flag.DurationVar(&syncPeriod, "sync-period", 10*time.Minute,
+		"How often to re-reconcile all Applications as a backstop for missed events "+
+			"(e.g. Freight produced after a FreightMissing verdict).")
 	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -57,16 +62,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := validateSyncPeriod(syncPeriod); err != nil {
+		setupLog.Error(err, "invalid --sync-period")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting kargo-argocd-observer",
 		"version", version.Version,
 		"buildDate", version.BuildDate,
 		"buildRef", version.BuildRef,
 		"observeMode", observeMode,
+		"syncPeriod", syncPeriod,
 	)
-
-	// Periodic resync backstop: re-reconciles all Applications even when an
-	// event was missed (e.g. Freight produced after a FreightMissing verdict).
-	syncPeriod := 10 * time.Minute
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
@@ -109,4 +116,13 @@ func main() {
 		setupLog.Error(err, "manager exited with error")
 		os.Exit(1)
 	}
+}
+
+// validateSyncPeriod rejects a non-positive resync interval, which would
+// disable or thrash the periodic reconcile backstop instead of pacing it.
+func validateSyncPeriod(d time.Duration) error {
+	if d <= 0 {
+		return fmt.Errorf("sync-period must be positive, got %s", d)
+	}
+	return nil
 }

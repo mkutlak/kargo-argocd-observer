@@ -9,6 +9,7 @@
 | `--leader-elect` | `false` | Enable leader election for multi-replica deployments |
 | `--dry-run` | `false` | Log and emit Events instead of creating Promotions |
 | `--observe-mode` | `opt-out` | `opt-out` observes all annotated Applications unless ignored; `opt-in` additionally requires the `kargo-observer.kutlak.cc/observe: "true"` annotation |
+| `--sync-period` | `10m` | How often to re-reconcile all Applications as a backstop for missed events; must be positive |
 
 ## Metrics
 
@@ -53,10 +54,8 @@ such as `nginx`.
 
 ## Known limitations (follow-ups)
 
-Not configurable from the Helm chart — both require a controller-side (Go) change:
+Not configurable from the Helm chart — requires a controller-side (Go) change:
 
-- **Cache resync period**: the 10-minute periodic reconcile backstop
-  (`cmd/observer/main.go`) is hardcoded; there's no `--sync-period` flag.
 - **Namespace-scoped RBAC**: the ClusterRole grants cluster-wide `get`/`list`/`watch`
   on Applications and Kargo resources. `rbac.extraRules` in the chart can extend or
   further restrict the grant, but true per-namespace scoping needs the controller's
