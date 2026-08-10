@@ -90,10 +90,11 @@ resources:
 podAnnotations: {}
 podLabels: {}
 
-# Pod-level security context. runAsUser/runAsGroup pin the distroless
-# image's nonroot user numerically (UID/GID 65532) — kubelet refuses to
-# verify runAsNonRoot against a symbolic user like "nonroot", so the
-# numeric IDs are required for the pod to be admitted.
+# Pod-level security context. runAsUser/runAsGroup mirror the numeric
+# UID/GID 65532 the image itself declares. Defense-in-depth rather than a
+# requirement: kubelet cannot verify runAsNonRoot against a symbolic user
+# like "nonroot", so these pins keep the pod admissible even on pre-0.5.3
+# image tags, whose config carried the symbolic name.
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532

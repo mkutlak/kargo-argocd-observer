@@ -74,7 +74,7 @@ rollout:
 | `resources` | requests `50m`/`64Mi`, limits `500m`/`256Mi` | Container resources |
 | `podAnnotations` | `{}` | Extra pod annotations |
 | `podLabels` | `{}` | Extra pod labels |
-| `podSecurityContext` | nonroot UID/GID `65532`, seccomp `RuntimeDefault` | Pod security context; numeric IDs let kubelet verify `runAsNonRoot` against the distroless image |
+| `podSecurityContext` | nonroot UID/GID `65532`, seccomp `RuntimeDefault` | Pod security context; the numeric IDs mirror the image's own user, keeping `runAsNonRoot` verifiable by kubelet even on pre-0.5.3 image tags |
 | `containerSecurityContext` | no privilege escalation, read-only rootfs, all capabilities dropped | Container security context |
 | `nodeSelector` | `{}` | Node selector |
 | `tolerations` | `[]` | Tolerations |
