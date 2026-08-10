@@ -28,6 +28,10 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /out/observer /observer
 
-USER nonroot:nonroot
+# Numeric UID/GID, not the symbolic "nonroot" the base image's own USER would
+# otherwise be overwritten with — kubelet cannot resolve a username to a UID, so
+# a symbolic USER makes `runAsNonRoot: true` fail admission with "image has
+# non-numeric user (nonroot), cannot verify user is non-root".
+USER 65532:65532
 
 ENTRYPOINT ["/observer"]
