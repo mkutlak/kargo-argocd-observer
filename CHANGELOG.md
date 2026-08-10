@@ -1,3 +1,9 @@
+## [0.5.3](https://github.com/mkutlak/kargo-argocd-observer/compare/v0.5.2...v0.5.3) (2026-08-10)
+
+### Bug Fixes
+
+* pin numeric UID/GID in the image so runAsNonRoot is verifiable ([3f2fbde](https://github.com/mkutlak/kargo-argocd-observer/commit/3f2fbde6d2ac4ddcb3191e5906435122c31c2dce))
+
 ## [0.5.2](https://github.com/mkutlak/kargo-argocd-observer/compare/v0.5.1...v0.5.2) (2026-07-03)
 
 ### Bug Fixes
