@@ -1,3 +1,12 @@
+## [0.5.4](https://github.com/mkutlak/kargo-argocd-observer/compare/v0.5.3...v0.5.4) (2026-10-09)
+
+### Bug Fixes
+
+* **chart:** appVersion 0.5.3 - image now carries a numeric user ([f8b7522](https://github.com/mkutlak/kargo-argocd-observer/commit/f8b7522aa72d7a37b884f864ffbebed8117dc278))
+* **chart:** appVersion 0.5.4 - skips target-aware Stages (Kargo v1.12) ([f14058f](https://github.com/mkutlak/kargo-argocd-observer/commit/f14058f6ae0f63a7623042f04a21a1925917c691))
+* **deps:** bump Go dependencies (k8s.io 0.36.3, client_golang 1.24.1) ([b1b4e22](https://github.com/mkutlak/kargo-argocd-observer/commit/b1b4e226dddfd36b7e0db2422260a9f2a12db1ad))
+* skip target-aware Stages (Kargo v1.12) instead of failing Promotion create ([bd58f3b](https://github.com/mkutlak/kargo-argocd-observer/commit/bd58f3b00330b8236416fbca203c81863e637964))
+
 ## [0.5.3](https://github.com/mkutlak/kargo-argocd-observer/compare/v0.5.2...v0.5.3) (2026-08-10)
 
 ### Bug Fixes
