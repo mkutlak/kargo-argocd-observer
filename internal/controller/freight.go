@@ -203,6 +203,14 @@ func stagePromotionSteps(stage *unstructured.Unstructured) []any {
 	return steps
 }
 
+// stageIsTargetAware reports whether the Stage selects Targets (spec.targets,
+// Kargo v1.12+). Kargo's webhook rejects Promotions created directly against
+// such a Stage; it is promoted only through a PromotionRequest.
+func stageIsTargetAware(stage *unstructured.Unstructured) bool {
+	targets, found, _ := unstructured.NestedFieldNoCopy(stage.Object, "spec", "targets")
+	return found && targets != nil
+}
+
 // stagePromotionVars returns the Stage's variables followed by its promotion
 // template's variables — the same order Kargo's own promotion builder uses,
 // so task steps resolve their inputs identically.

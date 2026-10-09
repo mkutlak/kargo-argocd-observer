@@ -94,6 +94,29 @@ func TestStagePromotionStepsAndVars(t *testing.T) {
 	}
 }
 
+func TestStageIsTargetAware(t *testing.T) {
+	// Mirrors Kargo's api.IsTargetAware (Spec.Targets != nil): an explicit
+	// null is not target-aware, empty selectors still are.
+	for _, tc := range []struct {
+		name    string
+		targets any
+		set     bool
+		want    bool
+	}{
+		{name: "absent"},
+		{name: "null", set: true},
+		{name: "empty selectors", targets: map[string]any{"selectors": []any{}}, set: true, want: true},
+	} {
+		stage := testStageObj(currentTag, false)
+		if tc.set {
+			stage.Object["spec"].(map[string]any)["targets"] = tc.targets
+		}
+		if got := stageIsTargetAware(stage); got != tc.want {
+			t.Errorf("%s: stageIsTargetAware = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestBuildPromotion(t *testing.T) {
 	steps := []any{map[string]any{"uses": "fake-step"}}
 	vars := []any{map[string]any{"name": "env", "value": "qa"}}

@@ -168,6 +168,17 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// (create / dry-run / events) carry the drift at Info level.
 	log.V(1).Info("deployed images diverge from stage's current freight", "drift", formatDrift(drifted))
 
+	// Kargo v1.12+ rejects direct Promotions against a target-aware Stage;
+	// only a PromotionRequest may promote it. Checked before steps: Kargo
+	// doesn't require a promotionTemplate on such a Stage.
+	if stageIsTargetAware(stage) {
+		r.Recorder.Eventf(stage, corev1.EventTypeWarning, "StageIsTargetAware",
+			"stage selects targets (spec.targets) and Kargo accepts only PromotionRequest-driven Promotions for it; cannot align it with deployed images %s",
+			formatDrift(drifted))
+		log.Info("stage is target-aware, skipping")
+		return ctrl.Result{}, nil
+	}
+
 	// Kargo cannot promote to a Stage without promotion template steps; the
 	// admission webhook would reject every Promotion the observer creates.
 	steps := stagePromotionSteps(stage)

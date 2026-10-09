@@ -404,6 +404,39 @@ func TestReconcile(t *testing.T) {
 			wantEvents:     []string{"StageHasNoPromotionSteps"},
 		},
 		{
+			name: "target-aware stage emits event and skips",
+			app:  testApp(authorizedAnns, []string{deployedImage}),
+			objs: []client.Object{
+				func() client.Object {
+					stage := testStageObj(currentTag, false)
+					_ = unstructured.SetNestedField(stage.Object, map[string]any{"selectors": []any{}}, "spec", "targets")
+					return stage
+				}(),
+				testWarehouse(),
+				testFreight(freightName, deployedTag),
+			},
+			wantPromotions: 0,
+			wantEvents:     []string{"StageIsTargetAware"},
+		},
+		{
+			// Kargo doesn't require steps on a target-aware Stage; report the
+			// real cause rather than suggesting a promotionTemplate.
+			name: "target-aware stage without promotion steps reports target-aware",
+			app:  testApp(authorizedAnns, []string{deployedImage}),
+			objs: []client.Object{
+				func() client.Object {
+					stage := testStageObj(currentTag, false)
+					unstructured.RemoveNestedField(stage.Object, "spec", "promotionTemplate")
+					_ = unstructured.SetNestedField(stage.Object, map[string]any{"selectors": []any{}}, "spec", "targets")
+					return stage
+				}(),
+				testWarehouse(),
+				testFreight(freightName, deployedTag),
+			},
+			wantPromotions: 0,
+			wantEvents:     []string{"StageIsTargetAware"},
+		},
+		{
 			name: "ignore annotation",
 			app: testApp(map[string]string{
 				authorizedStageAnnotation: testNS + ":" + testStage,

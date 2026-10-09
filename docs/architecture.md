@@ -112,6 +112,8 @@ See the Helm chart's `clusterrole.yaml` template for the full
   Warehouse's discovery window, no Freight will match and the controller emits
   `FreightMissing` until a Warehouse discovers it (or a stable-line Warehouse is added).
 - Old Promotions are garbage-collected by Kargo itself, not by this controller.
+- Target-aware Stages (`spec.targets`, Kargo v1.12+) are promoted only through
+  PromotionRequests, so the observer skips them with a `StageIsTargetAware` Event.
 - Stages must define `promotionTemplate` steps — Kargo rejects Promotions for step-less
   (control-flow) Stages, so the observer skips them with a `StageHasNoPromotionSteps`
   Event.
