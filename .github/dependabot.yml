@@ -1,9 +1,14 @@
 version: 2
+# Every ecosystem is checked twice a month (1st and 15th): Dependabot has no
+# two-week interval.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: "0 5 1,15 * *"
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(ci)"
   # Keeps the digest-pinned base images in the Dockerfile current.
@@ -13,7 +18,8 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: "0 5 1,15 * *"
     cooldown:
       default-days: 7
     commit-message:
@@ -28,7 +34,8 @@ updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: "0 5 1,15 * *"
     cooldown:
       default-days: 7
     commit-message:
@@ -38,3 +45,24 @@ updates:
         patterns:
           - "k8s.io/*"
           - "sigs.k8s.io/*"
+  # The release toolchain (.github/release/package-lock.json).
+  - package-ecosystem: npm
+    directory: /.github/release
+    schedule:
+      interval: cron
+      cronjob: "0 5 1,15 * *"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(ci)"
+    ignore:
+      # semantic-release 26 needs Node >= 26.13: bump node-version in
+      # release.yml together with it, by hand.
+      - dependency-name: semantic-release
+        update-types:
+          - version-update:semver-major
+      # v10+ fails or renders EMPTY release notes with semantic-release 25's
+      # release-notes-generator. Re-check with a dry run before bumping.
+      - dependency-name: conventional-changelog-conventionalcommits
+        update-types:
+          - version-update:semver-major

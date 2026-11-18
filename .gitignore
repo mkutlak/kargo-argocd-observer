@@ -48,6 +48,7 @@ kubeconfig
 *.key
 
 # Local tool state
+node_modules/
 .omc/*
 !.omc/skills/
 .claude/settings.local.json

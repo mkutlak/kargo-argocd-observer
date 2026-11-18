@@ -61,23 +61,37 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # semantic-release and its plugins come from the committed lockfile in
+      # .github/release: exact versions and integrity hashes for the whole
+      # dependency tree, no install scripts, no token while installing.
+      - name: Install semantic-release
+        working-directory: .github/release
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Semantic Release
         id: semantic
-        uses: cycjimmy/semantic-release-action@ad51787758d9654d5a75150a89a6fa9b3ccef95e # v8.1.4
-        with:
-          # Pinned: unpinned, the action installs the latest semantic-release,
-          # and v26 requires Node >= 26.13 while the action runs on Node 24.
-          semantic_version: 25.0.9
-          # Pinned: conventional-changelog-conventionalcommits v10+ is
-          # incompatible with semantic-release 25's release-notes-generator
-          # (it fails or renders EMPTY release notes); 9.x is the newest that
-          # works. Re-check with `semantic-release --dry-run` before bumping.
-          extra_plugins: |
-            @semantic-release/changelog@7.0.0
-            @semantic-release/git@11.0.1
-            conventional-changelog-conventionalcommits@9.3.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          latest() {
+            git for-each-ref --count=1 --sort=-v:refname --format='%(refname:short)' 'refs/tags/v*'
+          }
+          before="$(latest)"
+          .github/release/node_modules/.bin/semantic-release
+          after="$(latest)"
+          if [ "$after" != "$before" ]; then
+            {
+              echo "new_release_published=true"
+              echo "new_release_git_tag=$after"
+              echo "new_release_version=${after#v}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "new_release_published=false" >> "$GITHUB_OUTPUT"
+          fi
 
   build-image:
     name: Build and push image

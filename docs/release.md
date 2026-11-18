@@ -18,6 +18,11 @@ not trigger an application release. In particular, `fix(chart)`/`feat(chart)` co
 never release the app; a chart change is published only when `version` in
 `charts/kargo-argocd-observer/Chart.yaml` is bumped (see below).
 
+semantic-release and its plugins are installed with `npm ci --ignore-scripts` from
+`.github/release/package-lock.json`, so every package in the tree is pinned by version
+and integrity hash. To change a version, edit `.github/release/package.json` and run
+`npm install --package-lock-only --ignore-scripts` in that directory; commit both files.
+
 semantic-release creates the tag and GitHub release before the image is built. If
 `build-image` fails, use "Re-run failed jobs" on that run: a fresh dispatch finds nothing
 left to release and skips the build.
