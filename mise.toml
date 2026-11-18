@@ -28,7 +28,7 @@ run = "go build -o bin/observer ./cmd/observer"
 [tasks."build-static"]
 description = "Build static observer binary (matches Docker, CGO_ENABLED=0)"
 run = '''
-CGO_ENABLED=0 GOOS=linux go build \
+CGO_ENABLED=0 GOOS=linux go build -trimpath \
   -ldflags="-s -w \
     -X github.com/mkutlak/kargo-argocd-observer/internal/version.Version=$BUILD_VERSION \
     -X github.com/mkutlak/kargo-argocd-observer/internal/version.BuildDate=$BUILD_DATE \
@@ -78,6 +78,10 @@ run = "go mod tidy"
 description = "Full quality gate (fmt + vet + lint + test)"
 run = ["mise run fmt", "mise run vet", "mise run lint", "mise run test"]
 
+[tasks.vuln]
+description = "Scan for known vulnerabilities reachable from the code (needs network)"
+run = "go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./..."
+
 # ══ Docker ═════════════════════════════════════════════════════
 
 [tasks."docker:build"]
@@ -114,7 +118,8 @@ for v in \
   metrics.serviceMonitor.enabled=true,metrics.prometheusRule.enabled=true \
   serviceAccount.create=false,serviceAccount.name=custom \
   rbac.create=false,rbac.leaderElection.create=false \
-  leaderElect=false,replicaCount=1; do
+  leaderElect=false,replicaCount=1 \
+  networkPolicy.enabled=true; do
   helm template x "$chart" --set "$v" >/dev/null
 done
 

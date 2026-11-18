@@ -4,3 +4,37 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "chore(ci)"
+  # Keeps the digest-pinned base images in the Dockerfile current.
+  # fix(deps) so that merging one releases an image built on the new base
+  # (the chart's default tag still needs its appVersion bumped by hand).
+  # The cooldown keeps a same-day bad release from being proposed.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "fix(deps)"
+    ignore:
+      # The Go minor version moves together with go.mod and mise.toml, by
+      # hand: CI tests and govulncheck run on mise's Go, not the image's.
+      - dependency-name: golang
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"

@@ -1,0 +1,11 @@
+# Allow-list: the build stage reads only the Go module and its sources.
+# Everything else (git history, CI config, local tool state, secrets a
+# developer may have lying around) stays out of the build context.
+# Without .git the binary carries no Go VCS stamp (`go version -m` shows
+# "(devel)"); the version comes from the -ldflags in the Dockerfile.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+**/*_test.go

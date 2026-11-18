@@ -64,7 +64,8 @@ such as `nginx`.
 
 Not configurable from the Helm chart — requires a controller-side (Go) change:
 
-- **Namespace-scoped RBAC**: the ClusterRole grants cluster-wide `get`/`list`/`watch`
-  on Applications and Kargo resources. `rbac.extraRules` in the chart can extend or
-  further restrict the grant, but true per-namespace scoping needs the controller's
-  cache/watches to become namespace-aware.
+- **Namespace-scoped RBAC**: the ClusterRole grants are cluster-wide (read access to
+  Applications, Stages, Warehouses and Freight; `list`/`create` on Promotions; the
+  `promote` verb on Stages). `rbac.extraRules` in the chart can only add rules — RBAC
+  cannot subtract — so true per-namespace scoping needs the controller's cache/watches
+  to become namespace-aware.

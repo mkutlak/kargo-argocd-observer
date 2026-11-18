@@ -26,6 +26,7 @@ mise run helm:variants   # render value variants + check rendered args against t
 
 # Build
 mise run docker:build    # build the container image
+mise run vuln            # govulncheck: known vulnerabilities reachable from the code
 ```
 
 ## Repository layout

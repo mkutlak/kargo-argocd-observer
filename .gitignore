@@ -28,8 +28,29 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
 
 # Build output
 bin/
+
+# Packaged Helm charts (`mise run helm:package`)
+*.tgz
+
+# Local overrides and credentials — never commit these
+.env.*
+!.env.example
+*.local.yaml
+*.local.yml
+kubeconfig
+*.kubeconfig
+*.pem
+*.key
+
+# Local tool state
+.omc/*
+!.omc/skills/
+.claude/settings.local.json
+
+# OS noise
+.DS_Store
