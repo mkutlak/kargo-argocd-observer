@@ -8,9 +8,9 @@ minimum_release_age = "7d"
 
 # ── Tool versions ─────────────────────────────────────────────
 [tools]
-go            = "1.26.4"   # keep in sync with go.mod
+go            = "1.27.4"   # keep in sync with go.mod
 golangci-lint = "2"
-helm          = "3"
+helm          = "4"
 yq            = "4"
 
 # ── Build metadata (injected into binaries / images) ──────────
