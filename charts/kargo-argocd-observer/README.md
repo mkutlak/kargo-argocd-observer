@@ -58,6 +58,7 @@ rollout:
 | `replicaCount` | `2` | Replicas; active/standby via leader election |
 | `dryRun` | `true` | Observe-only: log/emit Events instead of creating Promotions; flip to `false` to act |
 | `observeMode` | `opt-in` | Scoped rollout: `opt-in` only acts on Applications annotated `kargo-observer.kutlak.cc/observe: "true"`; `opt-out` acts on all annotated Applications unless ignored |
+| `requireStageConsent` | `false` | Two-sided opt-in: also require the Stage to name the Application in its `kargo-observer.kutlak.cc/applications` annotation (comma-separated `<namespace>/<name>`). Needs observer image 0.6.0 or newer |
 | `leaderElect` | `true` | Enable leader election (required with >1 replica) |
 | `syncPeriod` | `10m` | Periodic resync backstop — how often all Applications are re-reconciled; must be positive |
 | `extraArgs` | `[]` | Extra command-line arguments appended after the templated ones |
@@ -65,7 +66,7 @@ rollout:
 | `logging.encoder` | `""` | `--zap-encoder`; omitted when empty |
 | `logging.devMode` | `""` | `--zap-devel`; omitted when empty |
 | `serviceAccount.create` | `true` | Create the ServiceAccount |
-| `serviceAccount.name` | `""` | ServiceAccount name; defaults to the chart fullname |
+| `serviceAccount.name` | `""` | ServiceAccount name; defaults to the chart fullname when `serviceAccount.create` is `true`, required (render fails otherwise) when it is `false` |
 | `serviceAccount.annotations` | `{}` | Extra ServiceAccount annotations |
 | `serviceAccount.automountServiceAccountToken` | `true` | Automount the ServiceAccount token into the pod |
 | `rbac.create` | `true` | Create the ClusterRole/ClusterRoleBinding |
@@ -101,7 +102,7 @@ rollout:
 | `metrics.port` | `8080` | Container port for `--metrics-bind-address` |
 | `metrics.service.port` | `8080` | Metrics Service port (defaults to the same value as `metrics.port`) |
 | `health.port` | `8081` | Container port for `--health-probe-bind-address` |
-| `podDisruptionBudget.enabled` | `true` | Create a PodDisruptionBudget for the active/standby pair |
+| `podDisruptionBudget.enabled` | `true` | Create a PodDisruptionBudget for the active/standby pair; skipped when `replicaCount` is `1` |
 | `podDisruptionBudget.minAvailable` | `1` | Minimum available pods; mutually exclusive with `maxUnavailable` |
 | `podDisruptionBudget.maxUnavailable` | unset | Overrides `minAvailable` when set |
 | `metrics.serviceMonitor.enabled` | `false` | Create a ServiceMonitor (requires Prometheus Operator CRDs) |

@@ -53,8 +53,9 @@ helm upgrade kargo-argocd-observer oci://ghcr.io/mkutlak/charts/kargo-argocd-obs
 
 All chart values are documented in
 [charts/kargo-argocd-observer/README.md](charts/kargo-argocd-observer/README.md).
-If you prefer raw manifests over a Helm release, render them with
-`helm template kargo-argocd-observer charts/kargo-argocd-observer`.
+If you prefer raw manifests over a Helm release, render them for a target namespace
+(the RBAC subjects take their namespace from `--namespace`) and apply them there:
+`helm template kargo-argocd-observer charts/kargo-argocd-observer --namespace <ns> | kubectl apply --namespace <ns> -f -`.
 
 ## Documentation
 

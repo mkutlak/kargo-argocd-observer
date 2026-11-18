@@ -32,6 +32,14 @@ dryRun: true
 # confident the controller should watch everything (unless ignored).
 observeMode: opt-in
 
+# Two-sided opt-in: when true, an Application's authorized-stage annotation is
+# not enough — the Stage must also name the Application in its
+# kargo-observer.kutlak.cc/applications annotation (comma-separated
+# "<namespace>/<name>"). Turn it on when the people who can edit Applications
+# are not the people who own the Kargo Stages. Needs observer image 0.6.0 or
+# newer (older ones exit on the unknown flag).
+requireStageConsent: false
+
 # Leader election — required whenever replicaCount > 1 so only one replica
 # reconciles at a time.
 leaderElect: true
@@ -59,7 +67,7 @@ logging:
 
 serviceAccount:
   create: true
-  name: ""  # defaults to the chart fullname when create is true
+  name: ""  # defaults to the chart fullname when create is true; required when create is false
   annotations: {}
   # Disabling this stops the token from being auto-mounted into the pod.
   automountServiceAccountToken: true
@@ -179,9 +187,10 @@ service:
   labels: {}
 
 # Voluntary-disruption budget for the active/standby pair. Enabled by default
-# so a node drain can't take down both replicas at once. minAvailable and
-# maxUnavailable are mutually exclusive — setting maxUnavailable overrides
-# minAvailable.
+# so a node drain can't take down both replicas at once. Skipped when
+# replicaCount is 1 (minAvailable: 1 would block every node drain).
+# minAvailable and maxUnavailable are mutually exclusive — setting
+# maxUnavailable overrides minAvailable.
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
@@ -213,6 +222,8 @@ metrics:
     # Restrict which namespaces the ServiceMonitor is allowed to select
     # Services from (Prometheus Operator namespaceSelector).
     namespaceSelector: {}
+    # With false, the metric's own `namespace` label (the Kargo project) is renamed
+    # to `exported_namespace` and `namespace` becomes the observer's namespace.
     honorLabels: false
     # Extra labels added to the ServiceMonitor metadata, e.g. to match your
     # Prometheus Operator's serviceMonitorSelector:

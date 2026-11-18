@@ -1,6 +1,9 @@
 {{- if not (has .Values.observeMode (list "opt-in" "opt-out")) }}
 {{- fail "observeMode must be \"opt-in\" or \"opt-out\"" }}
 {{- end }}
+{{- if and (not .Values.leaderElect) (gt (int .Values.replicaCount) 1) }}
+{{- fail "leaderElect must be true when replicaCount > 1: two active replicas would both create Promotions" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -58,6 +61,10 @@ spec:
             - --leader-elect={{ .Values.leaderElect }}
             - --dry-run={{ .Values.dryRun }}
             - --observe-mode={{ .Values.observeMode }}
+            {{- /* Rendered only when set: observer images before 0.6.0 reject the flag. */}}
+            {{- if .Values.requireStageConsent }}
+            - --require-stage-consent=true
+            {{- end }}
             - --sync-period={{ .Values.syncPeriod }}
             {{- with .Values.logging.level }}
             - --zap-log-level={{ . }}

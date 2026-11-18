@@ -18,7 +18,7 @@ spec:
       rules:
         {{- if .Values.metrics.prometheusRule.freightMissing.enabled }}
         - alert: KargoObserverFreightMissing
-          expr: max by (namespace, stage) (kargo_observer_freight_missing) > {{ .Values.metrics.prometheusRule.freightMissing.threshold }}
+          expr: max by (namespace, exported_namespace, stage) (kargo_observer_freight_missing) > {{ .Values.metrics.prometheusRule.freightMissing.threshold }}
           for: {{ .Values.metrics.prometheusRule.freightMissing.for }}
           labels:
             severity: {{ .Values.metrics.prometheusRule.freightMissing.severity }}
@@ -40,7 +40,7 @@ spec:
 
         {{- if .Values.metrics.prometheusRule.absent.enabled }}
         - alert: KargoObserverAbsent
-          expr: absent(up{job="{{ include "kargo-argocd-observer.fullname" . }}"}) == 1
+          expr: absent(up{job="{{ include "kargo-argocd-observer.fullname" . }}"} == 1)
           for: {{ .Values.metrics.prometheusRule.absent.for }}
           labels:
             severity: {{ .Values.metrics.prometheusRule.absent.severity }}

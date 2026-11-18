@@ -76,6 +76,6 @@ Create the name of the service account to use.
 {{- if .Values.serviceAccount.create }}
 {{- default (include "kargo-argocd-observer.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
-{{- default "default" .Values.serviceAccount.name }}
+{{- required "serviceAccount.name is required when serviceAccount.create is false (the namespace's default ServiceAccount is never used implicitly)" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
