@@ -100,6 +100,39 @@ run = "helm lint charts/kargo-argocd-observer"
 description = "Render the Helm chart (validate templating)"
 run = "helm template kargo-argocd-observer charts/kargo-argocd-observer"
 
+[tasks."helm:variants"]
+description = "Render chart value variants and check the rendered args against the binary's flags"
+depends = ["build"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+chart=charts/kargo-argocd-observer
+
+# These variants must render.
+for v in \
+  replicaCount=1 \
+  metrics.serviceMonitor.enabled=true,metrics.prometheusRule.enabled=true \
+  serviceAccount.create=false,serviceAccount.name=custom \
+  rbac.create=false,rbac.leaderElection.create=false \
+  leaderElect=false,replicaCount=1; do
+  helm template x "$chart" --set "$v" >/dev/null
+done
+
+# These variants must be rejected by the chart's fail guards.
+for v in leaderElect=false serviceAccount.create=false; do
+  if helm template x "$chart" --set "$v" >/dev/null 2>&1; then
+    echo "expected render to fail: $v" >&2
+    exit 1
+  fi
+done
+
+# Flag drift: the binary exits 2 on an unknown flag and 0 once it reaches --help.
+rendered=$(helm template x "$chart" --set logging.level=debug,logging.encoder=json,logging.devMode=true,requireStageConsent=true)
+args=$(yq 'select(.kind == "Deployment") | .spec.template.spec.containers[0].args[]' <<<"$rendered")
+mapfile -t args <<<"$args"
+./bin/observer "${args[@]}" --help
+'''
+
 [tasks."helm:package"]
 description = "Package the Helm chart"
 run = "helm package charts/kargo-argocd-observer"

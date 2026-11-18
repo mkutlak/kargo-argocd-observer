@@ -6,7 +6,9 @@ on:
     branches: [main]
     paths:
       - "charts/**"
+      - "cmd/**"
       - "mise.toml"
+      - "mise.lock"
       - ".github/workflows/ci-chart.yml"
 
 permissions:
@@ -17,12 +19,36 @@ jobs:
     name: Helm chart lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
 
       - name: Lint chart
         run: mise run helm:lint
 
       - name: Template chart (validate rendering)
         run: mise run helm:template
+
+      - name: Render value variants and check args against the binary
+        run: mise run helm:variants
+
+      # The chart release is skipped when the helm-v<version> tag already exists,
+      # so a chart change without a version bump would silently never publish.
+      - name: Require a Chart.yaml version bump for chart changes
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --depth=1 origin "${BASE_REF}"
+          if git diff --quiet "origin/${BASE_REF}" HEAD -- charts/; then
+            exit 0
+          fi
+          chart=charts/kargo-argocd-observer/Chart.yaml
+          base_chart=$(git show "origin/${BASE_REF}:${chart}")
+          base_version=$(yq '.version' <<<"${base_chart}")
+          head_version=$(yq '.version' "${chart}")
+          if [ "${base_version}" = "${head_version}" ]; then
+            echo "::error file=${chart}::charts/ changed but version is still ${head_version}; bump it or the chart will not be published"
+            exit 1
+          fi
+

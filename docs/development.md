@@ -22,6 +22,7 @@ mise run test-cover      # test with HTML coverage report
 # Helm chart
 mise run helm:lint
 mise run helm:template
+mise run helm:variants   # render value variants + check rendered args against the binary's flags
 
 # Build
 mise run docker:build    # build the container image

@@ -2,12 +2,6 @@ name: Release
 
 on:
   workflow_dispatch:
-    inputs:
-      force-release:
-        description: "Force semantic-release to run (useful after path-ignore skips)"
-        required: false
-        type: boolean
-        default: false
   push:
     branches: [main]
     paths-ignore:
@@ -17,11 +11,7 @@ on:
       - ".claude/**"
       - ".github/**"
 
-permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+permissions: {}
 
 env:
   REGISTRY: ghcr.io
@@ -32,13 +22,15 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
 
       - name: Cache Go build & modules
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
@@ -53,27 +45,35 @@ jobs:
     name: Semantic release
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     outputs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
       tag: ${{ steps.semantic.outputs.new_release_git_tag }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Semantic Release
         id: semantic
-        uses: cycjimmy/semantic-release-action@v6
+        uses: cycjimmy/semantic-release-action@ad51787758d9654d5a75150a89a6fa9b3ccef95e # v8.1.4
         with:
-          # Pinned: unpinned conventional-changelog-conventionalcommits pulls
-          # the latest major (v10+), which is incompatible with the bundled
-          # release-notes-generator and silently renders EMPTY release notes.
+          # Pinned: unpinned, the action installs the latest semantic-release,
+          # and v26 requires Node >= 26.13 while the action runs on Node 24.
+          semantic_version: 25.0.9
+          # Pinned: conventional-changelog-conventionalcommits v10+ is
+          # incompatible with semantic-release 25's release-notes-generator
+          # (it fails or renders EMPTY release notes); 9.x is the newest that
+          # works. Re-check with `semantic-release --dry-run` before bumping.
           extra_plugins: |
-            @semantic-release/changelog@6
-            @semantic-release/git@10
-            conventional-changelog-conventionalcommits@8.0.0
+            @semantic-release/changelog@7.0.0
+            @semantic-release/git@11.0.1
+            conventional-changelog-conventionalcommits@9.3.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -82,8 +82,13 @@ jobs:
     needs: release
     if: needs.release.outputs.published == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release.outputs.tag }}
 
@@ -91,10 +96,10 @@ jobs:
       # --platform=$BUILDPLATFORM + GOOS/GOARCH, and the distroless final
       # stage is assembled without executing foreign-arch binaries.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -102,7 +107,7 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -114,7 +119,7 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -131,7 +136,7 @@ jobs:
           sbom: true
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}

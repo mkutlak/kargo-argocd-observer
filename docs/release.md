@@ -13,8 +13,14 @@ by conventional commits (`.releaserc.yml`): `fix:` bumps patch, `feat:` bumps mi
    `ghcr.io/mkutlak/kargo-argocd-observer` with semver tags, build provenance, and an
    SBOM attestation.
 
-Commits touching only `*.md`, `docs/**`, `.claude/**`, or `charts/**` do not trigger an
-application release.
+Commits touching only `*.md`, `docs/**`, `charts/**`, `.claude/**`, or `.github/**` do
+not trigger an application release. In particular, `fix(chart)`/`feat(chart)` commits
+never release the app; a chart change is published only when `version` in
+`charts/kargo-argocd-observer/Chart.yaml` is bumped (see below).
+
+semantic-release creates the tag and GitHub release before the image is built. If
+`build-image` fails, use "Re-run failed jobs" on that run: a fresh dispatch finds nothing
+left to release and skips the build.
 
 ## Helm chart
 
