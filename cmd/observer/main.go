@@ -34,6 +34,7 @@ func main() {
 		dryRun      bool
 		observeMode string
 		syncPeriod  time.Duration
+		consent     bool
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metrics endpoint binds to.")
@@ -46,6 +47,9 @@ func main() {
 	flag.StringVar(&observeMode, "observe-mode", controller.ObserveModeOptOut,
 		"Which annotated Applications to act on: 'opt-out' observes all unless ignored; "+
 			"'opt-in' additionally requires the kargo-observer.kutlak.cc/observe=\"true\" annotation.")
+	flag.BoolVar(&consent, "require-stage-consent", false,
+		"Only act on an Application its Stage names in the "+
+			"kargo-observer.kutlak.cc/applications annotation (comma-separated <namespace>/<name>).")
 	flag.DurationVar(&syncPeriod, "sync-period", 10*time.Minute,
 		"How often to re-reconcile all Applications as a backstop for missed events "+
 			"(e.g. Freight produced after a FreightMissing verdict).")
@@ -73,6 +77,7 @@ func main() {
 		"buildRef", version.BuildRef,
 		"observeMode", observeMode,
 		"syncPeriod", syncPeriod,
+		"requireStageConsent", consent,
 	)
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -93,9 +98,10 @@ func main() {
 		Scheme: mgr.GetScheme(),
 		// The corev1 events API keeps the reconciler on record.EventRecorder,
 		// which record.NewFakeRecorder can stand in for in tests.
-		Recorder:    mgr.GetEventRecorderFor("kargo-argocd-observer"), //nolint:staticcheck // SA1019: deliberate, see above
-		DryRun:      dryRun,
-		ObserveMode: observeMode,
+		Recorder:            mgr.GetEventRecorderFor("kargo-argocd-observer"), //nolint:staticcheck // SA1019: deliberate, see above
+		DryRun:              dryRun,
+		ObserveMode:         observeMode,
+		RequireStageConsent: consent,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to set up controller", "controller", "Application")

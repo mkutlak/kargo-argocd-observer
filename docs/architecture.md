@@ -26,9 +26,19 @@ Promotions*; it never touches Stage status directly.
    Application's `.status.summary.images` and compares them against the Stage's current
    view, `.status.freightHistory[0]`, restricted to the repositories subscribed to by the
    Stage's `requestedFreight` origin Warehouses. Equal tags short-circuit as a no-op —
-   this is what keeps the controller loop-free.
+   this is what keeps the controller loop-free. ArgoCD lists the images of live Pods,
+   so during a rollout a repository appears with both the old and the new tag; such a
+   repository is ignored (and logged) until it settles on one tag. When two of the Stage's origins
+   carry the same repository, the Application is in sync if it deploys either tag.
 3. **Find the matching Freight.** On drift, the controller lists `Freight` in the Stage's
-   namespace and looks for one whose images match *all* of the drifted repo:tag pairs.
+   namespace and looks for one, from one of the Stage's Warehouses, that would move
+   *only* what drifted: every image the Freight carries must be at the tag the
+   Application deploys (or, for a repository the Application does not deploy, at the
+   tag the Stage currently holds from that Warehouse — or from another origin when
+   that Warehouse holds none), and at least one must be a drifted tag. Of several such
+   Freight the newest wins. A Freight that carries the bumped tag next to a different
+   tag for some other image is never promoted — that would deploy or roll back an image
+   nobody touched.
 4. **Promote.** A match produces a `Promotion` named `<stage>.<ulid>.<freight-prefix>`
    — exactly Kargo's own naming scheme, and deliberately so: Kargo's stage controller
    records a finished Promotion into freight history only when its name sorts lexically
@@ -39,11 +49,27 @@ Promotions*; it never touches Stage status directly.
    Stage's promotion template steps and variables — copied the same way Kargo's own API
    server builds Promotions, because Kargo's admission webhook rejects step-less
    Promotions rather than defaulting them from the Stage. The webhook then authorizes it,
-   inflates task references, and stamps the Stage's shard; because the tag is already
-   live in git, the promotion changes only Kargo's bookkeeping.
-5. **Guard against repeats.** The controller skips reconciliation while the Stage has a
-   Promotion in flight, and will not recreate a Promotion for a Freight it already tried
-   and failed for — delete the failed Promotion to retry.
+   inflates task references, and stamps the Stage's shard. The Promotion is a real one:
+   Kargo runs the Stage's steps. Because the chosen Freight's images equal what is
+   already deployed, the image part of those steps is a no-op in git; anything else the
+   Freight carries (git commits, charts) is not compared.
+5. **Guard against repeats and races.** The controller does not create a Promotion
+   - unless the Application is `Synced`. While it is `OutOfSync` the cluster is not
+     running what git holds — typically a Kargo promotion ArgoCD has not applied yet
+     (sync window, manual or failed sync) — and promoting to the images still running
+     would undo that promotion. The Application is re-evaluated as soon as it becomes
+     `Synced`;
+   - while any Promotion for the Stage is unfinished, whoever created it;
+   - for 5 minutes after the Stage's last Promotion finished — ArgoCD may still report
+     the previous revision's images, and acting on that would promote the Stage straight
+     back;
+   - when another observed Application of the same Stage deploys a different tag for a
+     drifted repository (`ApplicationsDisagree`) — the two would otherwise take turns
+     promoting the Stage;
+   - when its own most recent Promotion for the Stage was for the same Freight and
+     failed, errored or was aborted — delete that Promotion to retry (picked up at the
+     next resync). The verdict is dropped once the Stage has finished a newer Promotion,
+     so going A → B → A works.
 
 ```
 ArgoCD Application (kargo.akuity.io/authorized-stage annotation)
@@ -58,8 +84,8 @@ compare deployed image tags (.status.summary.images)
         └── tags differ (drift)
                 │
                 ▼
-        find Freight in the Stage namespace whose images
-        match ALL drifted repo:tag pairs
+        find the newest Freight in the Stage namespace whose
+        images equal the deployed tags and fix the drift
                 │
         ┌───────┴────────┐
         │                │
@@ -71,8 +97,9 @@ compare deployed image tags (.status.summary.images)
         │
         ▼
   Kargo admission webhook checks the `promote` verb,
-  then executes the Promotion — a git no-op, since the
-  tag is already deployed; Stage's Freight state updates
+  then executes the Promotion — the image part is a git
+  no-op, since those tags are already deployed; Stage's
+  Freight state updates
 ```
 
 ## Implementation notes
@@ -84,8 +111,9 @@ compare deployed image tags (.status.summary.images)
   the controller from Argo/Kargo internal API versioning.
 - **Event-driven with a resync backstop.** The primary watch is on Applications
   (filtered by annotation, with updates reduced to annotation/image changes); Stage
-  changes re-enqueue their Applications; a 10-minute cache resync catches anything
-  missed.
+  changes re-enqueue their Applications. Freight and Promotions are not watched: the
+  cache resync (`--sync-period`, 10 minutes by default) re-reconciles every observed
+  Application and is what picks up newly discovered Freight or a deleted Promotion.
 - **Leader election** makes multi-replica deployments safe; only the leader reconciles.
 
 ## RBAC
@@ -103,11 +131,51 @@ The controller needs:
 See the Helm chart's `clusterrole.yaml` template for the full
 `ClusterRole`/`ClusterRoleBinding`.
 
+## Trust model
+
+The observer holds `promote` on every Stage, and by default it believes the
+Application: the `authorized-stage` annotation picks the Stage and
+`.status.summary.images` says what is deployed. Anyone who can create or annotate an
+Application the observer watches can therefore have any *existing* Freight of that
+Stage's Warehouses promoted to it, without holding `promote` themselves. Kargo's own
+check runs the other way round (the Application authorizes the Stage), so it does not
+close this.
+
+Where the people who can edit Applications are not the people who own the Stages, run
+with `--require-stage-consent` (chart: `requireStageConsent=true`). The Stage must then
+name each Application allowed to drive it:
+
+```yaml
+metadata:
+  annotations:
+    kargo-observer.kutlak.cc/applications: "argocd/web-qa, argocd/api-qa"
+```
+
+An Application the Stage does not list is skipped with a log line and no Event.
+Editing the annotation re-evaluates the Stage's Applications right away.
+
+Not closed by the flag: the Promotion carries the Stage's own steps and runs with
+Kargo's privileges, so whoever can edit a Stage's `promotionTemplate` gets those steps
+executed once drift appears, without holding `promote`.
+
 ## Limitations
 
-- One Promotion is created per reconcile. A Stage with multiple Warehouse origins where
-  several repositories drift at the same time converges over several reconciles, not
-  instantly.
+- One Promotion is created per reconcile, and one Freight comes from one Warehouse. A
+  Stage with multiple Warehouse origins where repositories of several origins drift at
+  the same time converges one origin at a time, each step waiting out the 5-minute
+  settle period.
+- `Synced` is ArgoCD's last comparison. Until ArgoCD refreshes after a Kargo push, the
+  Application still reads `Synced` while running the old images; only the 5-minute
+  settle wait covers that window. With refresh slowed or disabled and steps that do not
+  wait for ArgoCD, the observer can still promote the Stage back.
+- An Application that never reaches `Synced` (for example one resource that always
+  shows a diff) is never acted on; the log says so each time drift is seen.
+- A Pod that keeps an old tag around for good — a finished Job kept by its history
+  limit, an evicted Pod — makes ArgoCD report the repository with two tags, and the
+  observer ignores that repository until the Pod is gone. The log names the repository
+  and its tags.
+- Freight is matched on image tags only. A Warehouse that produces several Freight with
+  identical images (differing in git commit or chart) gets the newest one.
 - The matching Freight must already exist — if the hand-bumped tag has aged out of the
   Warehouse's discovery window, no Freight will match and the controller emits
   `FreightMissing` until a Warehouse discovers it (or a stable-line Warehouse is added).

@@ -3,6 +3,7 @@ package controller
 import (
 	"crypto/rand"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -72,23 +73,42 @@ func normalizeRepoURL(repo string) string {
 	return repo
 }
 
-// deployedImages extracts repo->tag from an ArgoCD Application's
+// deployedImageTags extracts repo->distinct tags from an ArgoCD Application's
 // .status.summary.images.
-func deployedImages(app *unstructured.Unstructured) map[string]string {
+func deployedImageTags(app *unstructured.Unstructured) map[string][]string {
 	refs, _, _ := unstructured.NestedStringSlice(app.Object, "status", "summary", "images")
-	images := map[string]string{}
+	tags := map[string][]string{}
 	for _, ref := range refs {
-		if repo, tag, ok := parseImageRef(ref); ok {
-			images[normalizeRepoURL(repo)] = tag
+		repo, tag, ok := parseImageRef(ref)
+		if !ok {
+			continue
+		}
+		repo = normalizeRepoURL(repo)
+		if !slices.Contains(tags[repo], tag) {
+			tags[repo] = append(tags[repo], tag)
+		}
+	}
+	return tags
+}
+
+// deployedImages extracts repo->tag from an ArgoCD Application's
+// .status.summary.images. ArgoCD lists the images of live Pods, so a rollout
+// shows the outgoing and the incoming tag side by side; a repository seen
+// with more than one tag is left out until it settles on one.
+func deployedImages(app *unstructured.Unstructured) map[string]string {
+	images := map[string]string{}
+	for repo, tags := range deployedImageTags(app) {
+		if len(tags) == 1 {
+			images[repo] = tags[0]
 		}
 	}
 	return images
 }
 
-// stageCurrentImages extracts repo->tag from the Stage's current Freight,
-// i.e. .status.freightHistory[0].items (a map of origin ID to
-// FreightReference, each carrying denormalized .images).
-func stageCurrentImages(stage *unstructured.Unstructured) map[string]string {
+// stageCurrentFreight returns the Stage's current Freight,
+// .status.freightHistory[0].items: a map of origin ID ("Warehouse/<name>")
+// to FreightReference, each carrying denormalized .images.
+func stageCurrentFreight(stage *unstructured.Unstructured) map[string]any {
 	history, _, _ := unstructured.NestedSlice(stage.Object, "status", "freightHistory")
 	if len(history) == 0 {
 		return nil
@@ -98,17 +118,36 @@ func stageCurrentImages(stage *unstructured.Unstructured) map[string]string {
 		return nil
 	}
 	items, _, _ := unstructured.NestedMap(entry, "items")
-	images := map[string]string{}
-	for _, item := range items {
+	return items
+}
+
+// stageCurrentImages extracts repo->tags from the Stage's current Freight.
+// A repository has one tag per origin that carries it.
+func stageCurrentImages(stage *unstructured.Unstructured) map[string][]string {
+	images := map[string][]string{}
+	for _, item := range stageCurrentFreight(stage) {
 		ref, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
 		for repo, tag := range imagesFromList(ref["images"]) {
-			images[repo] = tag
+			images[repo] = append(images[repo], tag)
 		}
 	}
 	return images
+}
+
+// stageHeldImages extracts the repo->tags that promoting a Freight of the
+// given Warehouse must leave alone: the tag the Stage holds from that
+// Warehouse — the one the Freight would replace — or, for a repository that
+// Warehouse holds no tag for, the tags held from the other origins.
+func stageHeldImages(stage *unstructured.Unstructured, warehouse string) map[string][]string {
+	held := stageCurrentImages(stage)
+	ref, _ := stageCurrentFreight(stage)["Warehouse/"+warehouse].(map[string]any)
+	for repo, tag := range imagesFromList(ref["images"]) {
+		held[repo] = []string{tag}
+	}
+	return held
 }
 
 // imagesFromList extracts repoURL->tag from a Kargo image list
@@ -170,27 +209,38 @@ func warehouseImageRepos(warehouse *unstructured.Unstructured) []string {
 	return repos
 }
 
-// freightMatches reports whether the Freight originates from one of the
-// given Warehouses and carries repo:tag for every drifted repository.
-func freightMatches(freight *unstructured.Unstructured, warehouses map[string]struct{}, drifted map[string]string) bool {
+// freightOrigin returns the name of the Warehouse the Freight came from.
+func freightOrigin(freight *unstructured.Unstructured) string {
 	origin, _, _ := unstructured.NestedString(freight.Object, "origin", "name")
 	if origin == "" {
 		// Older Kargo versions record only a top-level warehouse name.
 		origin, _, _ = unstructured.NestedString(freight.Object, "warehouse")
 	}
-	if _, ok := warehouses[origin]; !ok {
+	return origin
+}
+
+// freightMatches reports whether promoting the Freight would align the Stage
+// with the Application without moving any other image: it originates from
+// one of the given Warehouses, every image it carries is at the deployed tag
+// (or, for a repository the Application does not deploy, at a tag in held —
+// see stageHeldImages), and at least one is a drifted repo:tag. Commits and
+// charts the Freight carries are not compared.
+func freightMatches(freight *unstructured.Unstructured, warehouses map[string]struct{}, deployed, drifted map[string]string, held map[string][]string) bool {
+	if _, ok := warehouses[freightOrigin(freight)]; !ok {
 		return false
 	}
-	if len(drifted) == 0 {
-		return false
-	}
-	images := imagesFromList(freight.Object["images"])
-	for repo, tag := range drifted {
-		if images[repo] != tag {
+	fixesDrift := false
+	for repo, tag := range imagesFromList(freight.Object["images"]) {
+		if want, ok := deployed[repo]; ok {
+			if tag != want {
+				return false
+			}
+		} else if tags := held[repo]; len(tags) > 0 && !slices.Contains(tags, tag) {
 			return false
 		}
+		fixesDrift = fixesDrift || drifted[repo] == tag
 	}
-	return true
+	return fixesDrift
 }
 
 // stagePromotionSteps returns the Stage's promotion template steps

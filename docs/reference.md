@@ -9,6 +9,7 @@
 | `--leader-elect` | `false` | Enable leader election for multi-replica deployments |
 | `--dry-run` | `false` | Log and emit Events instead of creating Promotions |
 | `--observe-mode` | `opt-out` | `opt-out` observes all annotated Applications unless ignored; `opt-in` additionally requires the `kargo-observer.kutlak.cc/observe: "true"` annotation |
+| `--require-stage-consent` | `false` | Only act on an Application its Stage names in the `kargo-observer.kutlak.cc/applications` annotation; see [Trust model](architecture.md#trust-model) |
 | `--sync-period` | `10m` | How often to re-reconcile all Applications as a backstop for missed events; must be positive |
 
 ## Metrics
@@ -16,8 +17,12 @@
 | Metric | Labels | Description |
 |---|---|---|
 | `kargo_observer_promotions_created_total` | `namespace`, `stage` | Counter of Promotions created by the controller |
-| `kargo_observer_freight_missing` | `namespace`, `stage` | Gauge; `1` when a deployed tag has no matching Freight — usually the tag aged out of the Warehouse discovery window. Fix by adding a stable-line Warehouse |
+| `kargo_observer_freight_missing` | `namespace`, `stage` | Gauge; `1` when any observed Application of the Stage deploys a tag with no matching Freight — usually the tag aged out of the Warehouse discovery window. Fix by adding a stable-line Warehouse. The series disappears when no observed Application points at the Stage any more |
 | `kargo_observer_promotion_create_errors_total` | `namespace`, `stage` | Counter of failed Promotion create calls |
+
+`namespace` is the Stage's namespace. Scraped through the chart's ServiceMonitor
+(`honorLabels: false`) it arrives as `exported_namespace`, because Prometheus reserves
+`namespace` for the observer's own.
 
 ## Events
 
@@ -27,10 +32,11 @@ Emitted on the `Stage` object:
 |---|---|
 | `PromotionCreated` | A Promotion was created to converge the Stage on the deployed tag |
 | `DryRunPromotionSkipped` | Drift detected; no Promotion created because `--dry-run` is set |
-| `FreightMissing` | No Freight matches the deployed tag |
+| `FreightMissing` | No Freight carries exactly the deployed tags (see [How it works](architecture.md#how-it-works), step 3) |
+| `ApplicationsDisagree` | Another observed Application of the same Stage deploys a different tag for a drifted repository; nothing is promoted until they agree |
 | `StageIsTargetAware` | The Stage selects Targets (`spec.targets`, Kargo v1.12+), so Kargo rejects Promotions not created through a PromotionRequest; the observer skips it. Opt the Application out to silence the event |
 | `StageHasNoPromotionSteps` | The Stage defines no promotion template steps, so Kargo would reject any Promotion for it; add a `promotionTemplate` to the Stage or opt the Application out |
-| `PromotionPreviouslyFailed` | The controller already tried and failed to promote this Freight; delete the failed Promotion to retry |
+| `PromotionPreviouslyFailed` | The controller's most recent Promotion for the Stage was for this same Freight and ended `Failed`, `Errored` or `Aborted`; delete it to retry (picked up at the next resync) |
 | `PromotionCreateFailed` | The Promotion create call itself failed |
 
 Drift text in logs and Events shows Docker Hub repositories in canonical form
@@ -44,6 +50,7 @@ such as `nginx`.
 | `kargo.akuity.io/authorized-stage: "<namespace>:<stage>"` | `Application` | Links the Application to its Kargo Stage; required by Kargo's own ArgoCD integration, so it is already present wherever Kargo manages the Application |
 | `kargo-observer.kutlak.cc/ignore: "true"` | `Application` | Opts the Application out of observation; wins over the observe annotation in both modes |
 | `kargo-observer.kutlak.cc/observe: "true"` | `Application` | Opts the Application into observation; only takes effect with `--observe-mode=opt-in` |
+| `kargo-observer.kutlak.cc/applications: "<namespace>/<name>, ..."` | `Stage` | Names the Applications allowed to drive the Stage; only takes effect with `--require-stage-consent` |
 
 ## Labels set on created Promotions
 

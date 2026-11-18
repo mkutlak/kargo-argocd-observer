@@ -190,7 +190,7 @@ func TestDeployedImages(t *testing.T) {
 
 func TestStageCurrentImages(t *testing.T) {
 	got := stageCurrentImages(testStageObj(currentTag, false))
-	want := map[string]string{testRepo: currentTag}
+	want := map[string][]string{testRepo: {currentTag}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("stageCurrentImages() = %v, want %v", got, want)
 	}
@@ -222,27 +222,27 @@ func TestFreightMatches(t *testing.T) {
 	warehouses := map[string]struct{}{warehouseName: {}}
 	drift := map[string]string{testRepo: deployedTag}
 
-	if !freightMatches(testFreight("f1", deployedTag), warehouses, drift) {
+	if !freightMatches(testFreight("f1", deployedTag), warehouses, drift, drift, nil) {
 		t.Error("freightMatches() = false for matching origin and images, want true")
 	}
-	if freightMatches(testFreight("f2", currentTag), warehouses, drift) {
+	if freightMatches(testFreight("f2", currentTag), warehouses, drift, drift, nil) {
 		t.Error("freightMatches() = true for wrong tag, want false")
 	}
 
 	legacy := testFreight("f3", deployedTag)
 	unstructured.RemoveNestedField(legacy.Object, "origin")
 	_ = unstructured.SetNestedField(legacy.Object, warehouseName, "warehouse")
-	if !freightMatches(legacy, warehouses, drift) {
+	if !freightMatches(legacy, warehouses, drift, drift, nil) {
 		t.Error("freightMatches() = false for legacy warehouse field, want true")
 	}
 
 	foreign := testFreight("f4", deployedTag)
 	_ = unstructured.SetNestedField(foreign.Object, "other-warehouse", "origin", "name")
-	if freightMatches(foreign, warehouses, drift) {
+	if freightMatches(foreign, warehouses, drift, drift, nil) {
 		t.Error("freightMatches() = true for foreign warehouse, want false")
 	}
 
-	if freightMatches(testFreight("f5", deployedTag), warehouses, nil) {
+	if freightMatches(testFreight("f5", deployedTag), warehouses, nil, nil, nil) {
 		t.Error("freightMatches() = true for empty drift, want false")
 	}
 
@@ -256,7 +256,7 @@ func TestFreightMatches(t *testing.T) {
 		map[string]any{"repoURL": "docker.io/nginx", "tag": "1.27"},
 	}, "images")
 	hubDrift := map[string]string{"docker.io/library/nginx": "1.27"}
-	if !freightMatches(hubFreight, warehouses, hubDrift) {
+	if !freightMatches(hubFreight, warehouses, hubDrift, hubDrift, nil) {
 		t.Error("freightMatches() = false for cross-spelled Docker Hub repo, want true")
 	}
 }

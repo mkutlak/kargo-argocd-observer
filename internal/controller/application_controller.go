@@ -7,8 +7,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -37,6 +40,10 @@ const (
 	// observeAnnotation opts an Application into observation in opt-in mode
 	// when set to "true"; see ObserveModeOptIn.
 	observeAnnotation = "kargo-observer.kutlak.cc/observe"
+	// applicationsAnnotation, on a Stage, lists the Applications allowed to
+	// drive it as comma-separated "<namespace>/<name>"; only consulted with
+	// RequireStageConsent.
+	applicationsAnnotation = "kargo-observer.kutlak.cc/applications"
 
 	managedByLabel = "app.kubernetes.io/managed-by"
 	managedByValue = "kargo-argocd-observer"
@@ -91,7 +98,74 @@ type ApplicationReconciler struct {
 	// ObserveMode is one of ObserveModeOptOut (default) or ObserveModeOptIn;
 	// see shouldObserve.
 	ObserveMode string
+	// RequireStageConsent makes the Application's authorized-stage annotation
+	// insufficient on its own: the Stage must also name the Application in
+	// applicationsAnnotation.
+	RequireStageConsent bool
+
+	// appReader lists Applications from the informer cache; unset (tests) it
+	// falls back to the live client.
+	appReader client.Reader
+	missing   freightMissingTracker
 }
+
+// freightMissingTracker folds the per-Application FreightMissing verdicts
+// into the per-Stage kargo_observer_freight_missing gauge, so Applications
+// sharing a Stage don't overwrite each other and a Stage nobody reports on
+// any more loses its series.
+type freightMissingTracker struct {
+	mu     sync.Mutex
+	stages map[types.NamespacedName]map[types.NamespacedName]bool
+}
+
+// set records app's verdict for stage and drops it from any other Stage.
+func (t *freightMissingTracker) set(app, stage types.NamespacedName, missing bool) {
+	t.update(app, &stage, missing)
+}
+
+// forget drops an Application that is gone or no longer observed.
+func (t *freightMissingTracker) forget(app types.NamespacedName) {
+	t.update(app, nil, false)
+}
+
+func (t *freightMissingTracker) update(app types.NamespacedName, stage *types.NamespacedName, missing bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if stage != nil {
+		if t.stages == nil {
+			t.stages = map[types.NamespacedName]map[types.NamespacedName]bool{}
+		}
+		if t.stages[*stage] == nil {
+			t.stages[*stage] = map[types.NamespacedName]bool{}
+		}
+		t.stages[*stage][app] = missing
+	}
+	for key, apps := range t.stages {
+		if stage == nil || key != *stage {
+			if _, reported := apps[app]; !reported {
+				continue
+			}
+			delete(apps, app)
+		}
+		if len(apps) == 0 {
+			delete(t.stages, key)
+			freightMissing.DeleteLabelValues(key.Namespace, key.Name)
+			continue
+		}
+		value := 0.0
+		for _, m := range apps {
+			if m {
+				value = 1
+			}
+		}
+		freightMissing.WithLabelValues(key.Namespace, key.Name).Set(value)
+	}
+}
+
+// settlePeriod is how long after a Stage's last promotion finished the
+// observer waits before acting on drift: ArgoCD may still report the images
+// of the previous revision, and promoting on that would undo the promotion.
+const settlePeriod = 5 * time.Minute
 
 // shouldObserve reports whether an Application with these annotations is
 // observed: ignore always wins; opt-in mode also requires the observe
@@ -108,23 +182,29 @@ func (r *ApplicationReconciler) shouldObserve(annotations map[string]string) boo
 
 // Reconcile compares the Application's deployed images with its Kargo Stage's
 // current Freight and creates a Promotion when they diverge.
-func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
 	log := logf.FromContext(ctx)
 
 	app := &unstructured.Unstructured{}
 	app.SetGroupVersionKind(applicationGVK)
 	if err := r.Get(ctx, req.NamespacedName, app); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			r.missing.forget(req.NamespacedName)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
 
 	annotations := app.GetAnnotations()
 	if !r.shouldObserve(annotations) {
+		r.missing.forget(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 	stageNS, stageName, ok := parseAuthorizedStage(annotations[authorizedStageAnnotation])
 	if !ok {
 		log.V(1).Info("missing or malformed authorized-stage annotation",
 			"annotation", annotations[authorizedStageAnnotation])
+		r.missing.forget(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 	log = log.WithValues("stageNamespace", stageNS, "stage", stageName)
@@ -134,39 +214,64 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: stageNS, Name: stageName}, stage); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("stage not found, skipping application")
+			r.missing.forget(req.NamespacedName)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
-
-	deployed := deployedImages(app)
-	if len(deployed) == 0 {
+	if !r.stageConsents(stage, req.NamespacedName) {
+		log.Info("stage does not list this application in its " + applicationsAnnotation + " annotation, skipping")
+		r.missing.forget(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
+
+	// Every return below that reaches a verdict publishes it to the
+	// freight-missing gauge; waits and errors leave the last verdict standing.
+	missing, waiting := false, false
+	defer func() {
+		if err == nil && !waiting {
+			r.missing.set(req.NamespacedName, types.NamespacedName{Namespace: stageNS, Name: stageName}, missing)
+		}
+	}()
 
 	repos, err := r.stageImageRepos(ctx, stage)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if len(repos) == 0 {
-		return ctrl.Result{}, nil
+	// Expected during a rollout; logged because a Pod that never goes away
+	// (a finished Job, an evicted Pod) keeps the repository ignored for good.
+	for repo, tags := range deployedImageTags(app) {
+		if len(tags) > 1 && slices.Contains(repos, repo) {
+			log.Info("repository is deployed with several tags, ignoring it until one remains", "repo", repo, "tags", tags)
+		}
 	}
+	deployed := deployedImages(app)
 
 	current := stageCurrentImages(stage)
 	drifted := map[string]string{}
 	for _, repo := range repos {
-		if tag := deployed[repo]; tag != "" && current[repo] != tag {
+		if tag := deployed[repo]; tag != "" && !slices.Contains(current[repo], tag) {
 			drifted[repo] = tag
 		}
 	}
 	if len(drifted) == 0 {
-		freightMissing.WithLabelValues(stageNS, stageName).Set(0)
 		return ctrl.Result{}, nil
 	}
 	// Drift alone is V(1): the same divergence is re-detected on every
 	// reconcile until the Stage records the promotion. Action paths below
 	// (create / dry-run / events) carry the drift at Info level.
 	log.V(1).Info("deployed images diverge from stage's current freight", "drift", formatDrift(drifted))
+
+	// Unless the Application is Synced, the cluster is not running what git
+	// holds — typically a Kargo promotion ArgoCD has not applied yet (sync
+	// window, manual or failed sync). Promoting to the images still running
+	// would undo that promotion.
+	if sync := applicationSyncStatus(app); sync != "" && sync != syncStatusSynced {
+		log.Info("application is not Synced, its images may not be what git holds; skipping",
+			"syncStatus", sync, "drift", formatDrift(drifted))
+		waiting = true
+		return ctrl.Result{}, nil
+	}
 
 	// Kargo v1.12+ rejects direct Promotions against a target-aware Stage;
 	// only a PromotionRequest may promote it. Checked before steps: Kargo
@@ -191,32 +296,53 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Never race an in-flight promotion, whoever created it.
-	if current, found, _ := unstructured.NestedMap(stage.Object, "status", "currentPromotion"); found && len(current) > 0 {
+	if running, found, _ := unstructured.NestedMap(stage.Object, "status", "currentPromotion"); found && len(running) > 0 {
 		log.V(1).Info("stage has a promotion in progress, requeueing")
+		waiting = true
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
-
-	latest, err := r.latestObserverPromotion(ctx, stageNS, stageName)
+	if wait := settlePeriod - time.Since(lastPromotionFinishedAt(stage)); wait > 0 {
+		log.V(1).Info("stage finished a promotion recently, waiting for the application to settle")
+		waiting = true
+		return ctrl.Result{RequeueAfter: min(wait, settlePeriod)}, nil
+	}
+	latest, inFlight, err := r.stagePromotions(ctx, stageNS, stageName)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if latest != nil && !promotionPhaseTerminal(promotionPhase(latest)) {
-		log.V(1).Info("observer promotion still in flight, requeueing", "promotion", latest.GetName())
+	if inFlight != "" {
+		log.V(1).Info("promotion still in flight, requeueing", "promotion", inFlight)
+		waiting = true
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	target, err := r.findFreight(ctx, stage, drifted)
+	// Promoting for one Application while another deploys a different tag
+	// would have that one's reconcile promote the Stage straight back.
+	disagreement, err := r.disagreement(ctx, stage, req.NamespacedName, drifted)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if disagreement != "" {
+		r.Recorder.Eventf(stage, corev1.EventTypeWarning, "ApplicationsDisagree",
+			"application %s deploys %s but %s; not promoting until the stage's applications agree",
+			req.NamespacedName, formatDrift(drifted), disagreement)
+		log.Info("applications of the stage deploy different tags, skipping", "drift", formatDrift(drifted), "other", disagreement)
+		waiting = true // no Freight lookup happened
+		return ctrl.Result{}, nil
+	}
+
+	target, err := r.findFreight(ctx, stage, deployed, drifted)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if target == nil {
 		r.Recorder.Eventf(stage, corev1.EventTypeWarning, "FreightMissing",
 			"no Freight matches deployed images %s", formatDrift(drifted))
-		freightMissing.WithLabelValues(stageNS, stageName).Set(1)
+		missing = true
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
-	if latest != nil && latest.GetLabels()[freightLabel] == target.GetName() {
+	if latest != nil && latest.GetLabels()[freightLabel] == target.GetName() && !promotionSuperseded(stage, latest) {
 		switch phase := promotionPhase(latest); phase {
 		case phaseSucceeded:
 			// Kargo already accepted this exact Freight; the Stage's freight
@@ -226,14 +352,13 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.V(1).Info("promotion for this freight already succeeded, waiting for the stage to record it",
 				"promotion", latest.GetName())
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		case phaseFailed, phaseErrored:
-			// A failed promotion for the same freight is a human problem:
-			// recreating it would just fail again. The failed Promotion must
-			// be deleted to retry.
+		case phaseFailed, phaseErrored, phaseAborted:
+			// A failed or aborted promotion for the same freight is a human
+			// problem: recreating it would just end the same way. It must be
+			// deleted to retry.
 			r.Recorder.Eventf(stage, corev1.EventTypeWarning, "PromotionPreviouslyFailed",
 				"promotion %s for freight %s ended in phase %s; delete it to let the observer retry",
 				latest.GetName(), target.GetName(), phase)
-			freightMissing.WithLabelValues(stageNS, stageName).Set(0)
 			return ctrl.Result{}, nil
 		}
 	}
@@ -258,9 +383,31 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	r.Recorder.Eventf(stage, corev1.EventTypeNormal, "PromotionCreated",
 		"created promotion %s for freight %s (%s)", promotion.GetName(), target.GetName(), formatDrift(drifted))
 	promotionsCreatedTotal.WithLabelValues(stageNS, stageName).Inc()
-	freightMissing.WithLabelValues(stageNS, stageName).Set(0)
 	log.Info("created promotion", "promotion", promotion.GetName(), "freight", target.GetName(), "drift", formatDrift(drifted))
 	return ctrl.Result{RequeueAfter: time.Minute}, nil
+}
+
+// syncStatusSynced is ArgoCD's .status.sync.status for an Application whose
+// live state matches git.
+const syncStatusSynced = "Synced"
+
+func applicationSyncStatus(app *unstructured.Unstructured) string {
+	status, _, _ := unstructured.NestedString(app.Object, "status", "sync", "status")
+	return status
+}
+
+// stageConsents reports whether the Stage lets the Application drive it:
+// always, unless RequireStageConsent demands the Stage name it.
+func (r *ApplicationReconciler) stageConsents(stage *unstructured.Unstructured, app types.NamespacedName) bool {
+	if !r.RequireStageConsent {
+		return true
+	}
+	for entry := range strings.SplitSeq(stage.GetAnnotations()[applicationsAnnotation], ",") {
+		if strings.TrimSpace(entry) == app.Namespace+"/"+app.Name {
+			return true
+		}
+	}
+	return false
 }
 
 // stageImageRepos resolves the image repositories the Stage's Warehouses
@@ -283,30 +430,75 @@ func (r *ApplicationReconciler) stageImageRepos(ctx context.Context, stage *unst
 	return repos, nil
 }
 
-// latestObserverPromotion returns the most recently created Promotion this
-// observer made for the given stage, or nil when there is none.
-func (r *ApplicationReconciler) latestObserverPromotion(ctx context.Context, namespace, stage string) (*unstructured.Unstructured, error) {
+// lastPromotionFinishedAt returns when the Stage's last promotion finished
+// (.status.lastPromotion.finishedAt), or the zero time.
+func lastPromotionFinishedAt(stage *unstructured.Unstructured) time.Time {
+	value, _, _ := unstructured.NestedString(stage.Object, "status", "lastPromotion", "finishedAt")
+	finished, _ := time.Parse(time.RFC3339, value)
+	return finished
+}
+
+// promotionSuperseded reports whether the Stage has finished a newer
+// promotion since the given one was created, which makes that one's outcome
+// history rather than a verdict on the current drift. Kargo orders Promotions
+// by name; the finish time is checked as well so that a name sorting later
+// only because of clock skew cannot make the observer recreate in a loop.
+func promotionSuperseded(stage, promotion *unstructured.Unstructured) bool {
+	last, _, _ := unstructured.NestedString(stage.Object, "status", "lastPromotion", "name")
+	return last > promotion.GetName() &&
+		lastPromotionFinishedAt(stage).After(promotion.GetCreationTimestamp().Time)
+}
+
+// stagePromotions inspects every Promotion targeting the Stage, whoever
+// created it: inFlight names one Kargo has not finished yet (it may not have
+// reached .status.currentPromotion), latest is the observer's newest by name
+// (Kargo's own ordering).
+func (r *ApplicationReconciler) stagePromotions(ctx context.Context, namespace, stage string) (latest *unstructured.Unstructured, inFlight string, err error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(promotionListGVK)
-	if err := r.List(ctx, list,
-		client.InNamespace(namespace),
-		client.MatchingLabels{managedByLabel: managedByValue, stageLabel: stage},
-	); err != nil {
-		return nil, err
+	if err := r.List(ctx, list, client.InNamespace(namespace)); err != nil {
+		return nil, "", err
 	}
-	var latest *unstructured.Unstructured
 	for i := range list.Items {
 		p := &list.Items[i]
-		if latest == nil || p.GetCreationTimestamp().After(latest.GetCreationTimestamp().Time) {
+		if target, _, _ := unstructured.NestedString(p.Object, "spec", "stage"); target != stage {
+			continue
+		}
+		if !promotionPhaseTerminal(promotionPhase(p)) {
+			return nil, p.GetName(), nil
+		}
+		if p.GetLabels()[managedByLabel] == managedByValue && (latest == nil || p.GetName() > latest.GetName()) {
 			latest = p
 		}
 	}
-	return latest, nil
+	return latest, "", nil
 }
 
-// findFreight returns the Freight in the Stage's namespace that originates
-// from one of its Warehouses and matches every drifted repo:tag, or nil.
-func (r *ApplicationReconciler) findFreight(ctx context.Context, stage *unstructured.Unstructured, drifted map[string]string) (*unstructured.Unstructured, error) {
+// disagreement describes another observed Application of the Stage that
+// deploys a different tag for a drifted repository, or returns "".
+func (r *ApplicationReconciler) disagreement(ctx context.Context, stage *unstructured.Unstructured, app types.NamespacedName, drifted map[string]string) (string, error) {
+	others, err := r.stageApplications(ctx, stage)
+	if err != nil {
+		return "", err
+	}
+	for i := range others {
+		other := types.NamespacedName{Namespace: others[i].GetNamespace(), Name: others[i].GetName()}
+		if other == app || !r.stageConsents(stage, other) {
+			continue
+		}
+		deployed := deployedImages(&others[i])
+		for _, repo := range slices.Sorted(maps.Keys(drifted)) {
+			if tag, ok := deployed[repo]; ok && tag != drifted[repo] {
+				return fmt.Sprintf("%s deploys %s:%s", other, repo, tag), nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// findFreight returns the newest Freight in the Stage's namespace that
+// freightMatches accepts, or nil.
+func (r *ApplicationReconciler) findFreight(ctx context.Context, stage *unstructured.Unstructured, deployed, drifted map[string]string) (*unstructured.Unstructured, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(freightListGVK)
 	if err := r.List(ctx, list, client.InNamespace(stage.GetNamespace())); err != nil {
@@ -316,12 +508,23 @@ func (r *ApplicationReconciler) findFreight(ctx context.Context, stage *unstruct
 	for _, name := range stageWarehouseNames(stage) {
 		warehouses[name] = struct{}{}
 	}
+	var newest *unstructured.Unstructured
 	for i := range list.Items {
-		if freightMatches(&list.Items[i], warehouses, drifted) {
-			return &list.Items[i], nil
+		f := &list.Items[i]
+		if !freightMatches(f, warehouses, deployed, drifted, stageHeldImages(stage, freightOrigin(f))) {
+			continue
+		}
+		if newest == nil {
+			newest = f
+			continue
+		}
+		// Ties (same second) go to the name so the pick is stable.
+		created, best := f.GetCreationTimestamp(), newest.GetCreationTimestamp()
+		if created.After(best.Time) || (created.Equal(&best) && f.GetName() > newest.GetName()) {
+			newest = f
 		}
 	}
-	return nil, nil
+	return newest, nil
 }
 
 // parseAuthorizedStage splits the "<namespace>:<stage>" annotation value.
@@ -340,6 +543,9 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	app.SetGroupVersionKind(applicationGVK)
 	stage := &unstructured.Unstructured{}
 	stage.SetGroupVersionKind(stageGVK)
+	// The Application informer this controller starts already holds every
+	// Application; the manager's client would LIST them live each time.
+	r.appReader = mgr.GetCache()
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("kargo-argocd-observer").
@@ -351,8 +557,8 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // stagePredicate reduces Stage fan-out to the changes the observer acts on:
-// the spec (via generation), the recorded freight history, and the in-flight
-// promotion pointer. Kargo touches Stage status constantly (health checks,
+// the spec (via generation), the consent annotation, the recorded freight
+// history, and the in-flight promotion pointer. Kargo touches Stage status constantly (health checks,
 // verification bookkeeping); without this filter every touch would
 // re-reconcile every Application attached to the Stage.
 func stagePredicate() predicate.Funcs {
@@ -361,7 +567,8 @@ func stagePredicate() predicate.Funcs {
 		GenericFunc: func(event.GenericEvent) bool { return true },
 		DeleteFunc:  func(event.DeleteEvent) bool { return false },
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
+			if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() ||
+				e.ObjectOld.GetAnnotations()[applicationsAnnotation] != e.ObjectNew.GetAnnotations()[applicationsAnnotation] {
 				return true
 			}
 			oldStage, okOld := e.ObjectOld.(*unstructured.Unstructured)
@@ -383,7 +590,10 @@ func stagePredicate() predicate.Funcs {
 
 // applicationPredicate admits Applications carrying the authorized-stage
 // annotation and observed per shouldObserve, and filters updates down to
-// annotation or deployed-image changes.
+// annotation or deployed-image changes, the Application becoming Synced, and
+// the periodic informer resync.
+// An Application that is deleted or stops being observed gets one last
+// reconcile, which drops it from the freight-missing gauge.
 func (r *ApplicationReconciler) applicationPredicate() predicate.Funcs {
 	relevant := func(o client.Object) bool {
 		annotations := o.GetAnnotations()
@@ -392,10 +602,16 @@ func (r *ApplicationReconciler) applicationPredicate() predicate.Funcs {
 	return predicate.Funcs{
 		CreateFunc:  func(e event.CreateEvent) bool { return relevant(e.Object) },
 		GenericFunc: func(e event.GenericEvent) bool { return relevant(e.Object) },
-		DeleteFunc:  func(event.DeleteEvent) bool { return false },
+		DeleteFunc:  func(e event.DeleteEvent) bool { return relevant(e.Object) },
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			if !relevant(e.ObjectNew) {
-				return false
+				return relevant(e.ObjectOld)
+			}
+			// A resync (--sync-period) redelivers the object unchanged; it is
+			// the backstop for everything the observer does not watch, e.g.
+			// new Freight or a deleted Promotion.
+			if rv := e.ObjectNew.GetResourceVersion(); rv != "" && rv == e.ObjectOld.GetResourceVersion() {
+				return true
 			}
 			if !reflect.DeepEqual(e.ObjectOld.GetAnnotations(), e.ObjectNew.GetAnnotations()) {
 				return true
@@ -403,6 +619,10 @@ func (r *ApplicationReconciler) applicationPredicate() predicate.Funcs {
 			oldApp, okOld := e.ObjectOld.(*unstructured.Unstructured)
 			newApp, okNew := e.ObjectNew.(*unstructured.Unstructured)
 			if !okOld || !okNew {
+				return true
+			}
+			// Becoming Synced lifts the gate in Reconcile.
+			if was, is := applicationSyncStatus(oldApp), applicationSyncStatus(newApp); was != "" && was != is && is == syncStatusSynced {
 				return true
 			}
 			oldImages, _, _ := unstructured.NestedStringSlice(oldApp.Object, "status", "summary", "images")
@@ -415,22 +635,40 @@ func (r *ApplicationReconciler) applicationPredicate() predicate.Funcs {
 // applicationsForStage enqueues every Application whose authorized-stage
 // annotation points at the changed Stage.
 func (r *ApplicationReconciler) applicationsForStage(ctx context.Context, obj client.Object) []reconcile.Request {
-	want := obj.GetNamespace() + ":" + obj.GetName()
-	apps := &unstructured.UnstructuredList{}
-	apps.SetGroupVersionKind(applicationListGVK)
-	if err := r.List(ctx, apps); err != nil {
-		logf.FromContext(ctx).Error(err, "failed to list applications for stage", "stage", want)
+	apps, err := r.stageApplications(ctx, obj)
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "failed to list applications for stage",
+			"stage", obj.GetNamespace()+":"+obj.GetName())
 		return nil
 	}
-	var requests []reconcile.Request
-	for i := range apps.Items {
-		app := &apps.Items[i]
-		annotations := app.GetAnnotations()
-		if annotations[authorizedStageAnnotation] == want && r.shouldObserve(annotations) {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{Namespace: app.GetNamespace(), Name: app.GetName()},
-			})
-		}
+	requests := make([]reconcile.Request, 0, len(apps))
+	for i := range apps {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Namespace: apps[i].GetNamespace(), Name: apps[i].GetName()},
+		})
 	}
 	return requests
+}
+
+// stageApplications lists the observed Applications whose authorized-stage
+// annotation points at the Stage.
+func (r *ApplicationReconciler) stageApplications(ctx context.Context, stage client.Object) ([]unstructured.Unstructured, error) {
+	reader := r.appReader
+	if reader == nil {
+		reader = r.Client
+	}
+	want := stage.GetNamespace() + ":" + stage.GetName()
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(applicationListGVK)
+	if err := reader.List(ctx, list); err != nil {
+		return nil, err
+	}
+	var apps []unstructured.Unstructured
+	for i := range list.Items {
+		annotations := list.Items[i].GetAnnotations()
+		if annotations[authorizedStageAnnotation] == want && r.shouldObserve(annotations) {
+			apps = append(apps, list.Items[i])
+		}
+	}
+	return apps, nil
 }
