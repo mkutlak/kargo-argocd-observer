@@ -1,3 +1,15 @@
+## [0.6.0](https://github.com/mkutlak/kargo-argocd-observer/compare/v0.5.4...v0.6.0) (2026-11-18)
+
+### Features
+
+* **chart:** least-privilege RBAC, opt-in NetworkPolicy ([5e5f739](https://github.com/mkutlak/kargo-argocd-observer/commit/5e5f739eb6e3b96406b00600d9a103d738676e9a))
+* promote only exact-match Freight from Synced Applications; add --require-stage-consent ([10e57a6](https://github.com/mkutlak/kargo-argocd-observer/commit/10e57a681187ce1c6c61dceeeefed46b919b4bd4))
+
+### Bug Fixes
+
+* **chart:** appVersion 0.6.0 - render guards, alert fixes, requireStageConsent ([11462f3](https://github.com/mkutlak/kargo-argocd-observer/commit/11462f39ed19003e8c6467165bc853ee7baedd5b))
+* **deps:** bump Go 1.27.4, k8s.io 0.37.2, controller-runtime 0.25.3, client_golang 1.25.0 ([7a65290](https://github.com/mkutlak/kargo-argocd-observer/commit/7a65290d37936274501a2e34222eadaae7d839c0))
+
 ## [0.5.4](https://github.com/mkutlak/kargo-argocd-observer/compare/v0.5.3...v0.5.4) (2026-10-09)
 
 ### Bug Fixes
