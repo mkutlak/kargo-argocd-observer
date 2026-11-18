@@ -105,6 +105,8 @@ rollout:
 | `podDisruptionBudget.enabled` | `true` | Create a PodDisruptionBudget for the active/standby pair; skipped when `replicaCount` is `1` |
 | `podDisruptionBudget.minAvailable` | `1` | Minimum available pods; mutually exclusive with `maxUnavailable` |
 | `podDisruptionBudget.maxUnavailable` | unset | Overrides `minAvailable` when set |
+| `networkPolicy.enabled` | `false` | Create a NetworkPolicy that allows ingress to the metrics port only (needs a CNI that enforces NetworkPolicy; egress is not restricted) |
+| `networkPolicy.metricsFrom` | `[]` | NetworkPolicyPeers allowed to reach the metrics port; empty allows any source |
 | `metrics.serviceMonitor.enabled` | `false` | Create a ServiceMonitor (requires Prometheus Operator CRDs) |
 | `metrics.serviceMonitor.interval` | `30s` | Scrape interval |
 | `metrics.serviceMonitor.scrapeTimeout` | `""` | Per-scrape timeout; omitted when empty |
@@ -122,5 +124,5 @@ rollout:
 
 **Follow-ups needing a Go change (not configurable from this chart):** the 10-minute
 controller cache resync period, and true namespace-scoped RBAC (`rbac.extraRules` only
-lets you extend/restrict the existing cluster-wide grant, not scope watches to specific
-namespaces).
+adds rules to the existing cluster-wide grant; it cannot narrow it or scope watches to
+specific namespaces).

@@ -20,25 +20,38 @@ rules:
       - list
       - watch
 
-  # Read Kargo's view of the world: Stages, Freight, Warehouses, and existing Promotions.
+  # Read Kargo's view of the world. Only Stages are watched; the verbs below
+  # are exactly the calls the controller makes — extend them together with
+  # the code (e.g. a Freight watch needs list+watch).
   - apiGroups:
       - kargo.akuity.io
     resources:
       - stages
-      - freights
-      - warehouses
-      - promotions
     verbs:
       - get
       - list
       - watch
+  - apiGroups:
+      - kargo.akuity.io
+    resources:
+      - warehouses
+    verbs:
+      - get
+  - apiGroups:
+      - kargo.akuity.io
+    resources:
+      - freights
+    verbs:
+      - list
 
-  # Create Promotions when drift between ArgoCD and Kargo is detected.
+  # List a Stage's Promotions and create one when drift between ArgoCD and
+  # Kargo is detected.
   - apiGroups:
       - kargo.akuity.io
     resources:
       - promotions
     verbs:
+      - list
       - create
 
   # Kargo's admission webhook SubjectAccessReview-checks this virtual verb when a Promotion is created

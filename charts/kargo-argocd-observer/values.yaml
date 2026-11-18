@@ -77,9 +77,10 @@ rbac:
   # resources, create Promotions, and Kargo's virtual `promote` verb.
   # Disable to manage this RBAC out of band.
   create: true
-  # Extra PolicyRules appended to the ClusterRole — e.g. to further restrict or
-  # extend the cluster-wide `promote` verb grant. True namespace-scoped RBAC
-  # needs a controller-side change (see docs/reference.md follow-up note).
+  # Extra PolicyRules appended to the ClusterRole. They can only add
+  # permissions; RBAC cannot narrow the cluster-wide grant. True
+  # namespace-scoped RBAC needs a controller-side change (see
+  # docs/reference.md follow-up note).
   extraRules: []
   leaderElection:
     # Create the namespaced Role/RoleBinding needed for leader election.
@@ -195,6 +196,19 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
   # maxUnavailable: 1
+
+# NetworkPolicy closing the pods to everything except the metrics port.
+# Needs a CNI that enforces NetworkPolicy; without one it has no effect.
+# Egress is not restricted.
+networkPolicy:
+  enabled: false
+  # Who may scrape metrics: a list of NetworkPolicyPeers. Empty allows every
+  # source that can reach the pod. Example for a Prometheus in "monitoring":
+  #   metricsFrom:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: monitoring
+  metricsFrom: []
 
 metrics:
   # Port the container's Prometheus metrics endpoint binds to

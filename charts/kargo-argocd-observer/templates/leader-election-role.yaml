@@ -14,14 +14,11 @@ rules:
       - coordination.k8s.io
     resources:
       - leases
+    # All client-go's Lease lock ever calls.
     verbs:
       - get
-      - list
-      - watch
       - create
       - update
-      - patch
-      - delete
   - apiGroups:
       - ""
     resources:

@@ -16,3 +16,14 @@
 .idea/
 *.tmproj
 .vscode/
+
+# Packaged charts
+*.tgz
+# Local value overrides and credentials: `helm package` ships every file in
+# this directory to a public registry unless it is listed here.
+*.local.yaml
+*.local.yml
+.env
+.env.*
+*.pem
+*.key
